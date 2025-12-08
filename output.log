@@ -1,0 +1,20 @@
+Initializing model...
+Initializing tokenizer...
+Tokenizer init: Ministral-Stuff/tokenizer.json
+Parsing vocab...
+Parsing merges...
+Tokenizer init done
+Chat initialized. Type 'exit' to quit.
+
+User: [90m[Thinking] [DEBUG] Decoding Step: pos=0, token=1
+[DEBUG] Decoding Step: pos=1, token=3
+[DEBUG] Decoding Step: pos=2, token=13394
+[DEBUG] Decoding Step: pos=3, token=1395
+[DEBUG] Decoding Step: pos=4, token=1925
+[DEBUG] Decoding Step: pos=5, token=2984
+[DEBUG] Decoding Step: pos=6, token=1925
+[DEBUG] Decoding Step: pos=7, token=1063
+[DEBUG] Decoding Step: pos=8, token=4
+[DEBUG] Decoding Step: pos=9, token=34
+<SPECIAL_592>[DEBUG] Decoding Step: pos=10, token=592
+<SPECIAL_100>

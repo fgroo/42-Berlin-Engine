@@ -2,10 +2,10 @@ CC = gcc
 EXTRA_CFLAGS ?=
 
 # Configurable hyperparameters (override on command line)
-# Example: make FROZEN_LAYERS=20 SPARSE_K=128 chat
-FROZEN_LAYERS ?= 16
+# Reasonable LR after adapter wire fix
+FROZEN_LAYERS ?= 22
 SPARSE_K ?= 64
-NESTED_LR ?= 0.0005
+NESTED_LR ?= 0.001
 
 CONFIG_FLAGS = -DFROZEN_LAYERS=$(FROZEN_LAYERS) -DSPARSE_K=$(SPARSE_K) -DNESTED_LR=$(NESTED_LR)f
 CFLAGS = -Wall -Wextra -Werror -O3 -march=native -mavx2 -mfma -fopenmp -Isrc $(CONFIG_FLAGS) $(EXTRA_CFLAGS)
@@ -63,6 +63,9 @@ chat: $(LIB_OBJS) src/chat.o
 bench_headless: $(LIB_OBJS) src/bench_headless.o
 	$(CC) $(LIB_OBJS) src/bench_headless.o -o bench_headless -lm $(LDFLAGS)
 
+bench_learn: $(LIB_OBJS) src/bench_learn.o
+	$(CC) $(LIB_OBJS) src/bench_learn.o -o bench_learn -lm $(LDFLAGS)
+
 $(NAME): $(LIB_OBJS) main.o
 	$(CC) $(LIB_OBJS) main.o -o $(NAME) $(LDFLAGS)
 
@@ -70,9 +73,9 @@ $(NAME): $(LIB_OBJS) main.o
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) main.o
+	rm -f $(OBJS) main.o src/chat.o src/bench_headless.o src/bench_learn.o
 
 fclean: clean
-	rm -f $(NAME)
+	rm -f $(NAME) chat bench_headless bench_learn
 
 re: fclean all

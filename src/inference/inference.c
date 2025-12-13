@@ -309,11 +309,15 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 		// ========== NESTED LEARNING ADAPTER ==========
 		// Apply fluid w2 adapter: xb += w2_adapter @ hb
 		// This is where test-time learning injects context-specific knowledge
-		if (t->nested_learning && t->fluid_layers)
+		// CRITICAL: Apply adapters ALWAYS (when they exist)
+		// Only cache hb for backward pass when actively learning
+		if (t->fluid_layers)
 		{
-			// CRITICAL: Cache hb for backward pass (each layer needs its own)
-			memcpy(t->fluid_layers[i].hb_cache, s->hb, c->hidden_dim * sizeof(float));
+			// Cache hb for backward pass ONLY during learning
+			if (t->nested_learning)
+				memcpy(t->fluid_layers[i].hb_cache, s->hb, c->hidden_dim * sizeof(float));
 			
+			// ALWAYS apply the adapter contribution (trained weights persist!)
 			t_tensor *adapter = t->fluid_layers[i].w2_weight;
 			t_bf16 *a_data = (t_bf16 *)adapter->data;
 			// Naive matmul: adapter is [dim x hidden_dim], hb is [hidden_dim]

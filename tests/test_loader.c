@@ -100,8 +100,8 @@ void test_loader_get_tensor(void) {
     ASSERT_EQ(2, t->shape[1]);
     
     // Check data
-    ASSERT_EQ(0x3F80, t->data[0]);
-    ASSERT_EQ(0x4000, t->data[1]);
+    ASSERT_EQ(0x3F80, ((t_bf16 *)t->data)[0]);
+    ASSERT_EQ(0x4000, ((t_bf16 *)t->data)[1]);
     
     free_model(&model);
     remove(filename);

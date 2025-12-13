@@ -26,15 +26,14 @@
 #define MAX_TOKENS 8192
 
 // Stop strings for generation (model often doesn't emit EOS)
-// AGGRESSIVE stopping to prevent KV cache pollution
+// NOTE: Removed "\n\n" - too aggressive, cuts off mid-generation
 static const char *g_stop_strings[] = {
 	"</s>",
 	"User:",
 	"[/INST]",
 	"[INST]",
-	"\n\n",
+	// "\n\n",  // REMOVED: causes premature stop after "Hello!\n\n"
 	"\n\nUser",
-	"spaceship or spaceship",
 	NULL
 };
 
@@ -53,6 +52,35 @@ static int g_session_pos = 0;
 
 // Minimal system prompt
 #define SYSTEM_PROMPT ""
+
+// Trim leading and trailing whitespace in-place
+static void trim_whitespace(char *str)
+{
+	char	*start;
+	char	*end;
+	size_t	len;
+
+	if (!str || !str[0])
+		return;
+	// Trim leading whitespace
+	start = str;
+	while (*start && (*start == ' ' || *start == '\t' || *start == '\n' || *start == '\r'))
+		start++;
+	// Trim trailing whitespace
+	len = strlen(start);
+	if (len == 0)
+	{
+		str[0] = '\0';
+		return;
+	}
+	end = start + len - 1;
+	while (end > start && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r'))
+		end--;
+	// Shift to start and null terminate
+	len = end - start + 1;
+	memmove(str, start, len);
+	str[len] = '\0';
+}
 
 // ==================== UTF-8 SAFE PRINT BUFFER ====================
 // LLM tokens can split UTF-8 multi-byte characters across boundaries.
@@ -172,36 +200,52 @@ static void	flush_utf8_buffer(void)
 	}
 }
 
-// Build chat tokens with Mistral format:
-// First turn:  <s>[INST] user_message [/INST]
-// Later turns: [INST] user_message [/INST]  (NO duplicate BOS!)
+// Build chat tokens with official Ministral-3B Reasoning format:
+// First turn:  <s>[SYSTEM_PROMPT]{system}[/SYSTEM_PROMPT][INST]{user}[/INST]
+// Later turns: [INST]{user}[/INST] (no BOS, no system prompt)
 static int build_chat_tokens(t_tokenizer *tok, const char *user_input, int **out_tokens, int is_first_turn)
 {
 	int *user_tokens = NULL;
-	int n_user, total;
+	int *sys_tokens = NULL;
+	int n_user, n_sys = 0, total;
 	int i, idx;
+	
+	// Official Ministral default system prompt (simplified for concise answers)
+	static const char *sys_prompt = "Be concise. Answer directly with the result.";
 
-	// Encode user input only
+	// Encode user input
 	n_user = tokenizer_encode(tok, user_input, &user_tokens);
 	if (n_user < 0) return -1;
+	
+	// Encode system prompt on first turn
+	if (is_first_turn) {
+		n_sys = tokenizer_encode(tok, sys_prompt, &sys_tokens);
+		if (n_sys < 0) n_sys = 0;
+	}
 
-	// First turn: BOS + INST + user_tokens + INST_END
-	// Later turns: INST + user_tokens + INST_END (no BOS!)
+	// First turn: BOS + SYS + sys_tokens + SYS_END + INST + user_tokens + INST_END
+	// Later turns: INST + user_tokens + INST_END
 	if (is_first_turn)
-		total = 1 + 1 + n_user + 1; // BOS + INST + user + INST_END
+		total = 1 + 1 + n_sys + 1 + 1 + n_user + 1; // BOS + SYS + sys + SYS_END + INST + user + INST_END
 	else
 		total = 1 + n_user + 1;     // INST + user + INST_END
 	
 	*out_tokens = malloc(total * sizeof(int));
 	
 	idx = 0;
-	if (is_first_turn)
-		(*out_tokens)[idx++] = TOKEN_BOS;  // <s> only on first turn!
-	(*out_tokens)[idx++] = TOKEN_INST;     // [INST]
+	if (is_first_turn) {
+		(*out_tokens)[idx++] = TOKEN_BOS;      // <s>
+		(*out_tokens)[idx++] = TOKEN_SYS;      // [SYSTEM_PROMPT]
+		for (i = 0; i < n_sys; i++)
+			(*out_tokens)[idx++] = sys_tokens[i];
+		(*out_tokens)[idx++] = TOKEN_SYS_END;  // [/SYSTEM_PROMPT]
+	}
+	(*out_tokens)[idx++] = TOKEN_INST;         // [INST]
 	for (i = 0; i < n_user; i++)
 		(*out_tokens)[idx++] = user_tokens[i];
-	(*out_tokens)[idx++] = TOKEN_INST_END; // [/INST]
+	(*out_tokens)[idx++] = TOKEN_INST_END;     // [/INST]
 	
+	if (sys_tokens) free(sys_tokens);
 	free(user_tokens);
 	return total;
 }
@@ -237,9 +281,11 @@ static int run_generation(t_transformer *t, t_tokenizer *tok, const char *input_
 	printf("[DEBUG] Turn %s, pos=%d->%d, tokens=%d\n",
 		is_first_turn ? "FIRST" : "CONT",
 		g_session_pos, g_session_pos + n_tokens, n_tokens);
-	printf("[DEBUG] Tokens: [%d, %d, %d, %d, %d] (1=BOS, 3=INST, 4=/INST)\n",
+	// Show first 5 tokens AND the last token (should be Token 4 = [/INST])
+	printf("[DEBUG] Tokens: [%d, %d, %d, %d, %d ... LAST=%d] (1=BOS, 3=INST, 4=/INST)\n",
 		tokens[0], tokens[1], n_tokens > 2 ? tokens[2] : -1, 
-		n_tokens > 3 ? tokens[3] : -1, n_tokens > 4 ? tokens[4] : -1);
+		n_tokens > 3 ? tokens[3] : -1, n_tokens > 4 ? tokens[4] : -1,
+		tokens[n_tokens - 1]);
 	fflush(stdout);
 
 	if (expected_answer) printf("Sanity Check: %s\n", input_text);
@@ -303,7 +349,37 @@ static int run_generation(t_transformer *t, t_tokenizer *tok, const char *input_
 			}
 		}
 		
-		next_token = sample_top_p(&logits_tensor, TEMPERATURE, TOP_P, sampler_arena);
+		// DEBUG: Show top-5 logits to diagnose model collapse
+		if (i < 3) {
+			float *logits = t->state.logits;
+			int top5[5] = {0,0,0,0,0};
+			float top5_val[5] = {-1e9,-1e9,-1e9,-1e9,-1e9};
+			for (int j = 0; j < t->config.vocab_size; j++) {
+				if (logits[j] > top5_val[4]) {
+					top5_val[4] = logits[j]; top5[4] = j;
+					// Bubble sort into place
+					for (int k = 3; k >= 0; k--) {
+						if (top5_val[k+1] > top5_val[k]) {
+							float tv = top5_val[k]; int ti = top5[k];
+							top5_val[k] = top5_val[k+1]; top5[k] = top5[k+1];
+							top5_val[k+1] = tv; top5[k+1] = ti;
+						}
+					}
+				}
+			}
+			printf("[LOGITS] Top5: %d(%.1f) %d(%.1f) %d(%.1f) %d(%.1f) %d(%.1f)\n",
+				top5[0], top5_val[0], top5[1], top5_val[1], top5[2], top5_val[2],
+				top5[3], top5_val[3], top5[4], top5_val[4]);
+			fflush(stdout);
+		}
+		
+		// BLOCK TOKEN 0 (UNK): Mask it to -inf before sampling
+		// UNK corrupts the latent space and causes model collapse
+		t->state.logits[0] = -1e9f;
+		
+		// GREEDY SAMPLING (DEBUG MODE) - use argmax instead of top_p
+		next_token = sample_argmax(&logits_tensor);
+		// Original: next_token = sample_top_p(&logits_tensor, TEMPERATURE, TOP_P, sampler_arena);
 		arena_reset(sampler_arena);
 		
 		// PROMPT-ONLY LEARNING: Do NOT learn during generation
@@ -451,6 +527,8 @@ int main(int argc, char **argv)
 		if (!fgets(input, sizeof(input), stdin)) break;
 		
 		input[strcspn(input, "\n")] = 0;
+		trim_whitespace(input);  // Remove all leading/trailing whitespace
+		if (input[0] == '\0') continue;  // Skip empty input
 		if (strcmp(input, "exit") == 0) break;
 		
 		// Toggle learning commands

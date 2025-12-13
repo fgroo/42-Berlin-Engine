@@ -101,13 +101,40 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 	// This is more robust against safetensors lexicographical ordering (e.g. layers.10 before layers.2)
 	t->weights.layers = calloc(t->config.n_layers, sizeof(t_layer_weights));
 	
+	// Initialize vision tower to NULL (text-only mode, lazy loading)
+	t->vision = NULL;
+	
+	// Log lazy vision tensor count
+	if (t->model.num_vision_tensors > 0)
+		printf("[LOADER] %d vision tensors available (lazy, not in RAM)\n",
+			t->model.num_vision_tensors);
+	
 	for (int i = 0; i < t->model.num_tensors; i++)
 	{
 		char *name = t->model.tensors[i].name;
 		t_tensor *tensor = &t->model.tensors[i].tensor;
+		t_tensor_category cat = t->model.tensors[i].category;
 		
-		// Skip vision encoder weights (they have different shapes, e.g. [1024,1024])
-		if (strstr(name, "vision_encoder")) continue;
+		// Skip VISION tensors - they stay in mmap, never paged in text mode
+		if (cat == TENSOR_VISION)
+			continue ;
+		
+		// CRITICAL: Copy FLUID tensors from PROT_READ mmap to writable Arena
+		// Without this, backprop will SIGSEGV when trying to update weights!
+		if (cat == TENSOR_FLUID)
+		{
+			size_t size_bytes = tensor->size * sizeof(t_bf16);
+			t_bf16 *writable_ptr = arena_alloc(&t->fluid_arena, size_bytes);
+			
+			// Copy data from read-only mmap to writable arena
+			memcpy(writable_ptr, tensor->data, size_bytes);
+			
+			// Re-point tensor struct to writable arena memory
+			tensor->data = writable_ptr;
+			
+			printf("[FLUID] Copied '%s' to Arena (%zu bytes, now writable)\n",
+				name, size_bytes);
+		}
 		
 		// Check for layer weights
 		char *layer_marker = strstr(name, "layers.");
@@ -172,6 +199,9 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 	
 	// Scratch arena for Top-K selection (1MB is plenty)
 	arena_init(&t->scratch, 1024 * 1024);
+	
+	// Fluid arena for TENSOR_FLUID copies (writable adapters) - 64MB
+	arena_init(&t->fluid_arena, 64 * 1024 * 1024);
 	
 	// SPARSE ATTENTION: Top-K keys per head (0 = dense attention)
 	t->sparse_k = SPARSE_K;  // From config.h
@@ -299,6 +329,15 @@ void	transformer_free(t_transformer *t)
 	// Free arenas
 	arena_free(&t->kv_arena);
 	arena_free(&t->scratch);
+	arena_free(&t->fluid_arena);
+	
+	// Free vision tower if allocated
+	if (t->vision)
+	{
+		if (t->vision->vit_layers)
+			free(t->vision->vit_layers);
+		free(t->vision);
+	}
 	
 	// Free transposed output weights
 	if (t->output_weight_T)

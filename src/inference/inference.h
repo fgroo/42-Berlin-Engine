@@ -71,6 +71,19 @@ typedef struct s_fluid_layer
 	float		*hb_cache;   // Cached hidden activations [hidden_dim] for backprop
 }	t_fluid_layer;
 
+// =============== VISION TOWER (LAZY LOADING) ===============
+// Pointer is NULL in text-only mode - weights stay in mmap, never paged
+// Set via activate_vision_tower() to enable multimodal inference
+typedef struct s_vision_tower
+{
+	t_tensor	*patch_embed;      // Patch embedding [patch_size² * 3, embed_dim]
+	t_tensor	*pos_embed;        // Position embedding
+	t_tensor	**vit_layers;      // Pre-allocated pointer array to ViT blocks
+	t_tensor	*projector;        // Vision -> Text projection
+	int			num_vit_layers;
+	int			enabled;           // 0 = lazy (not paged), 1 = active
+}	t_vision_tower;
+
 typedef struct s_transformer
 {
 	t_transformer_config	config;
@@ -79,6 +92,7 @@ typedef struct s_transformer
 	t_model					model;
 	t_arena					kv_arena;
 	t_arena					scratch;
+	t_arena					fluid_arena;   // Arena for FLUID tensor copies (RW)
 	int						sparse_k;
 	int						nested_learning;
 	float					nested_lr;
@@ -87,11 +101,16 @@ typedef struct s_transformer
 	int						evict_keep_k;
 	t_tensor				evict_weights;
 	t_bf16					*output_weight_T;
+	t_vision_tower			*vision;       // NULL = text-only mode (lazy vision)
 }	t_transformer;
 
 int		transformer_init(t_transformer *t, const char *model_path, const char *config_path);
 void	transformer_free(t_transformer *t);
 float	*transformer_forward(t_transformer *t, int token, int pos);
 void	transformer_backward_step(t_transformer *t, int target_token, int pos);
+
+// Vision tower control
+int		activate_vision_tower(t_transformer *t);
+void	deactivate_vision_tower(t_transformer *t);
 
 #endif

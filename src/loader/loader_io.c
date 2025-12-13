@@ -47,6 +47,10 @@ int	load_model(t_model *model, const char *path)
 	uint64_t	header_size_le;
 	const char	*header_start;
 
+	/* Initialize counters */
+	model->num_vision_tensors = 0;
+	model->num_fluid_tensors = 0;
+	
 	if (open_and_stat(path, &fd, &model->file_size) < 0)
 		return (-1);
 	model->mapped_addr = mmap(NULL, model->file_size, PROT_READ, MAP_PRIVATE,
@@ -77,6 +81,31 @@ t_tensor	*get_tensor(t_model *model, const char *name)
 		i++;
 	}
 	printf("WARN: Tensor not found: %s\n", name);
+	return (NULL);
+}
+
+/*
+** Get the nth tensor of a specific category
+** Useful for iterating over all VISION or FLUID tensors
+*/
+t_tensor	*get_tensor_by_category(t_model *model, t_tensor_category cat,
+				int index)
+{
+	int	i;
+	int	count;
+
+	i = 0;
+	count = 0;
+	while (i < model->num_tensors)
+	{
+		if (model->tensors[i].category == cat)
+		{
+			if (count == index)
+				return (&model->tensors[i].tensor);
+			count++;
+		}
+		i++;
+	}
 	return (NULL);
 }
 

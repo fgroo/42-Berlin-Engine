@@ -34,7 +34,7 @@
 # endif
 
 # ifndef MAX_GEN_LEN
-#  define MAX_GEN_LEN 48
+#  define MAX_GEN_LEN 64
 # endif
 
 # ifndef REPETITION_PENALTY

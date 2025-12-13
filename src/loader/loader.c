@@ -6,7 +6,7 @@
 /*   By: marvin <marvin@student.42.fr>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2025/12/05 00:00:00 by marvin            #+#    #+#             */
-/*   Updated: 2025/12/08 00:00:00 by marvin           ###   ########.fr       */
+/*   Updated: 2025/12/12 00:00:00 by marvin           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -16,29 +16,28 @@
 #include <stdio.h>
 
 /*
-** VISION ENCODER LOBOTOMY: Skip multimodal tensors
-** Ministral 3B is native multimodal - vision encoder weights corrupt
-** text model if loaded. Skip tensors containing these substrings.
+** Categorize tensor by name pattern for memory management:
+** - VISION: Lazy loaded, excluded from sparse attention in text-only mode
+** - FLUID:  Copied to arena for gradient updates (LoRA adapters)
+** - FROZEN: Base weights, mmap read-only
 */
-static int	is_vision_tensor(const char *name)
+static t_tensor_category	categorize_tensor(const char *name)
 {
-	if (strstr(name, "vision"))
-		return (1);
-	if (strstr(name, "image"))
-		return (1);
-	if (strstr(name, "patch"))
-		return (1);
-	if (strstr(name, "pre_mm"))
-		return (1);
-	if (strstr(name, "adapter"))
-		return (1);
-	return (0);
+	if (strstr(name, "vision") || strstr(name, "image") ||
+		strstr(name, "patch") || strstr(name, "pre_mm") ||
+		strstr(name, "adapter") || strstr(name, "vit") ||
+		strstr(name, "projector"))
+		return (TENSOR_VISION);
+	if (strstr(name, "lora") || strstr(name, "fluid"))
+		return (TENSOR_FLUID);
+	return (TENSOR_FROZEN);
 }
 
 int	extract_name(t_model *model, const char *qs, const char *qe)
 {
-	int	len;
-	int	idx;
+	int					len;
+	int					idx;
+	t_tensor_category	cat;
 
 	len = qe - (qs + 1);
 	if (len >= MAX_NAME_LEN)
@@ -46,14 +45,21 @@ int	extract_name(t_model *model, const char *qs, const char *qe)
 	idx = model->num_tensors;
 	strncpy(model->tensors[idx].name, qs + 1, len);
 	model->tensors[idx].name[len] = '\0';
-	/* Skip metadata */
+	/* Skip metadata only */
 	if (strcmp(model->tensors[idx].name, "__metadata__") == 0)
 		return (0);
-	/* Skip vision encoder tensors (multimodal lobotomy) */
-	if (is_vision_tensor(model->tensors[idx].name))
+	/* Categorize tensor (don't skip vision anymore - lazy loading!) */
+	cat = categorize_tensor(model->tensors[idx].name);
+	model->tensors[idx].category = cat;
+	if (cat == TENSOR_VISION)
 	{
-		printf("[SKIP] Vision tensor: %s\n", model->tensors[idx].name);
-		return (0);
+		model->num_vision_tensors++;
+		printf("[LAZY] Vision tensor: %s\n", model->tensors[idx].name);
+	}
+	else if (cat == TENSOR_FLUID)
+	{
+		model->num_fluid_tensors++;
+		printf("[FLUID] Adapter tensor: %s\n", model->tensors[idx].name);
 	}
 	return (1);
 }

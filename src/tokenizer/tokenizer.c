@@ -209,8 +209,20 @@ static void	add_vocab_hash(t_tokenizer_internal *ti, char *token, int id)
 {
 	unsigned int	h;
 	t_vocab_entry	*entry;
+	t_vocab_entry	*e;
 
 	h = hash_str(token) % VOCAB_HASH_SIZE;
+	// Check if token already exists - if so, keep first occurrence (correct ID)
+	e = ti->vocab_map[h];
+	while (e)
+	{
+		if (strcmp(e->token, token) == 0)
+		{
+			// Token already exists - skip to preserve first ID
+			return;
+		}
+		e = e->next;
+	}
 	entry = malloc(sizeof(t_vocab_entry));
 	entry->token = token;
 	entry->id = id;
@@ -461,13 +473,14 @@ int	tokenizer_encode(t_tokenizer *t, const char *text, int **tokens)
 	// 1. Initial split into characters (bytes)
 	// Note: This assumes ASCII/UTF-8 bytes as initial tokens.
 	// Real BPE usually maps bytes to unicode chars first.
-	// We'll stick to simple byte-level BPE for now.
+	// Map space to Ġ (U+0120 = 0xC4 0xA0 in UTF-8)
 	i = 0;
 	while (text[i])
 	{
 		curr = calloc(1, sizeof(t_bpe_token));
 		if (text[i] == ' ')
 		{
+			// Ġ = U+0120 = 0xC4 0xA0 in UTF-8
 			curr->str = strdup("Ġ");
 		}
 		else
@@ -547,7 +560,8 @@ int	tokenizer_encode(t_tokenizer *t, const char *text, int **tokens)
 		// Note: The vocab might have "Ġ" for spaces.
 		// Our simple split didn't handle that.
 		// We'll just lookup raw string.
-		(*tokens)[out_idx++] = get_token_id(t, curr->str);
+		int tid = get_token_id(t, curr->str);
+		(*tokens)[out_idx++] = tid;
 		curr = curr->next;
 	}
 	

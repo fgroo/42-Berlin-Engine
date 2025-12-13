@@ -24,6 +24,7 @@ LIB_SRCS = $(SRC_DIR)/memory/arena.c \
       $(SRC_DIR)/loader/loader.c \
       $(SRC_DIR)/loader/loader_parse.c \
       $(SRC_DIR)/loader/loader_io.c \
+      $(SRC_DIR)/loader/loader_vision.c \
       $(SRC_DIR)/compute/ops_matmul.c \
       $(SRC_DIR)/compute/ops_norm.c \
       $(SRC_DIR)/compute/ops_rope.c \
@@ -58,6 +59,9 @@ test_inference: $(LIB_OBJS) tests/test_inference.o
 
 chat: $(LIB_OBJS) src/chat.o
 	$(CC) $(LIB_OBJS) src/chat.o -o chat -lm $(LDFLAGS)
+
+bench_headless: $(LIB_OBJS) src/bench_headless.o
+	$(CC) $(LIB_OBJS) src/bench_headless.o -o bench_headless -lm $(LDFLAGS)
 
 $(NAME): $(LIB_OBJS) main.o
 	$(CC) $(LIB_OBJS) main.o -o $(NAME) $(LDFLAGS)

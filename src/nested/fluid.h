@@ -35,4 +35,10 @@ void	optimizer_sgd_momentum(t_fluid_param_momentum *param,
 			float lr, float momentum);
 void	zero_grad(t_fluid_param *param);
 
+/* Gradient clipping to prevent explosion */
+void	fluid_clip_grad(t_fluid_param *param, float max_norm);
+
+/* Reset fluid weights to zero (transient learning) */
+void	fluid_reset(t_fluid_param *param);
+
 #endif

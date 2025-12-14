@@ -102,6 +102,9 @@ typedef struct s_transformer
 	t_tensor				evict_weights;
 	t_bf16					*output_weight_T;
 	float				*rope_thetas;      // Precomputed RoPE theta values [head_dim/2]
+	void				*lsh_ctx;          // LSH context for sparse routing (t_lsh_ctx*)
+	void				*lsh_index;        // LSH block index (t_lsh_index*)
+	int					use_lsh;           // Enable LSH-based sparse attention
 	t_vision_tower			*vision;       // NULL = text-only mode (lazy vision)
 }	t_transformer;
 

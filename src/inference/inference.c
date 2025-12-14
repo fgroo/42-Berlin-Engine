@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <immintrin.h>  // AVX2 intrinsics
 #include <omp.h>        // OpenMP parallelization
+#include "compute/ops_lsh.h"  // LSH for sparse attention routing
 
 // Helper: Pack 8x 32-bit ints to 8x 16-bit ints (lower 16 bits of each)
 // AVX2 doesn't have direct 256->128 pack, so we extract and combine
@@ -140,6 +141,20 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 		// KV Cache Append
 		kv_cache_append(&s->kv_cache[i], &k_tensor, &v_tensor);
 		
+		// ========== LSH INDEX UPDATE ==========
+		// Incrementally build block index for true O(K) sparse attention
+		// We accumulate keys, compute centroid + hash per block
+		if (t->lsh_ctx && t->lsh_index && i == 0)  // Layer 0 only for routing
+		{
+			t_lsh_ctx *lsh_ctx = (t_lsh_ctx *)t->lsh_ctx;
+			t_lsh_index *lsh_idx = (t_lsh_index *)t->lsh_index;
+			// Convert K to F32 for hashing (use first KV head)
+			float k_f32[LSH_MAX_DIM];
+			for (int d = 0; d < c->head_dim && d < LSH_MAX_DIM; d++)
+				k_f32[d] = s->k[d];
+			lsh_update(lsh_idx, lsh_ctx, k_f32, c->head_dim, pos);
+		}
+		
 		// ========== KV CACHE EVICTION ==========
 		// Auto-evict low-importance keys when cache fills up
 		if (s->kv_cache[i].current_seq_len > t->evict_threshold)
@@ -172,67 +187,127 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 		
 		if (use_sparse)
 		{
-			// SPARSE: Score all keys and select Top-K
+			// ========== HYBRID ATTENTION ==========
+			// 1. Sliding Window (Local): Always attend to last W tokens
+			//    - Guarantees local reasoning (arithmetic, syntax)
+			// 2. LSH (Global): For older tokens, use hash-based retrieval
+			//    - Handles long-context memory (RAG-style)
+			
 			topk_indices = arena_alloc(&t->scratch, attend_k * sizeof(int));
 			
-			// Score buffer for all keys
-			float *key_scores = arena_alloc(&t->scratch, kv_len * sizeof(float));
-			t_tensor score_tensor;
-			score_tensor.data = key_scores;
-			score_tensor.size = kv_len;
-			score_tensor.dtype = DTYPE_F32;
-			
-			// SIMD+OpenMP optimized key scoring
-			// NOTE: True Lightning Indexer would use smaller learned weights (d_I << d)
-			// This is a fast approximation using full Q·K with SIMD acceleration
-			t_bf16 *k_data = (t_bf16 *)s->kv_cache[i].k.data;
-			int kv_stride = c->n_kv_heads * c->head_dim;
+			t_lsh_ctx *lsh_ctx = (t_lsh_ctx *)t->lsh_ctx;
+			t_lsh_index *lsh_idx = (t_lsh_index *)t->lsh_index;
 			int head_dim = c->head_dim;
 			
-			#pragma omp parallel for schedule(static)
-			for (int ti = 0; ti < kv_len; ti++)
+			// Allocate candidate positions (window + LSH candidates)
+			int max_candidates = kv_len;  // Worst case: all positions
+			int *candidate_positions = arena_alloc(&t->scratch, max_candidates * sizeof(int));
+			int n_candidates = 0;
+			
+			// ===== STEP 1: SLIDING WINDOW (mandatory local context) =====
+			// Always include the last ATTN_WINDOW_SIZE positions
+			int window_start = (kv_len > ATTN_WINDOW_SIZE) ? (kv_len - ATTN_WINDOW_SIZE) : 0;
+			for (int ti = window_start; ti < kv_len; ti++)
 			{
+				candidate_positions[n_candidates++] = ti;
+			}
+			
+			// ===== STEP 2: LSH CANDIDATES (global context for old positions) =====
+			// Only add LSH candidates for positions OLDER than the window
+			if (window_start > 0 && lsh_ctx && lsh_idx && lsh_idx->n_blocks > 0)
+			{
+				// Compute query hash
+				float q_mean[LSH_MAX_DIM];
+				memset(q_mean, 0, head_dim * sizeof(float));
+				for (int h = 0; h < c->n_heads; h++)
+					for (int d = 0; d < head_dim; d++)
+						q_mean[d] += s->q[h * head_dim + d];
+				for (int d = 0; d < head_dim; d++)
+					q_mean[d] /= c->n_heads;
+				
+				uint32_t q_hash = lsh_ctx->initialized ? lsh_hash(lsh_ctx, q_mean) : 0;
+				
+				// Find candidate blocks via LSH
+				int block_ids[64];
+				int n_candidate_blocks = lsh_find_candidates(lsh_idx, (uint16_t)q_hash, 
+					block_ids, 64);
+				
+				// Add positions from LSH blocks (only if BEFORE window)
+				for (int b = 0; b < n_candidate_blocks && n_candidates < max_candidates; b++)
+				{
+					int blk_start = lsh_idx->block_starts[block_ids[b]];
+					int blk_len = lsh_idx->block_lens[block_ids[b]];
+					// Only include if block ends before window starts
+					if (blk_start + blk_len <= window_start)
+					{
+						for (int p = 0; p < blk_len && n_candidates < max_candidates; p++)
+						{
+							int pos_idx = blk_start + p;
+							if (pos_idx < window_start)  // Don't duplicate window
+								candidate_positions[n_candidates++] = pos_idx;
+						}
+					}
+				}
+			}
+			
+			// Step 3: Score only candidate positions with SIMD
+			float *key_scores = arena_alloc(&t->scratch, n_candidates * sizeof(float));
+			t_bf16 *k_data = (t_bf16 *)s->kv_cache[i].k.data;
+			int kv_stride = c->n_kv_heads * c->head_dim;
+			
+			#pragma omp parallel for schedule(static)
+			for (int ci = 0; ci < n_candidates; ci++)
+			{
+				int ti = candidate_positions[ci];
 				float score = 0.0f;
-				// Sum over KV heads with SIMD
 				for (int kv_h = 0; kv_h < c->n_kv_heads; kv_h++)
 				{
 					t_bf16 *k_vec = k_data + ti * kv_stride + kv_h * head_dim;
 					float *q_for_kv = s->q + (kv_h * (c->n_heads/c->n_kv_heads)) * head_dim;
 					
-					// AVX2 dot product
 					__m256 sum_vec = _mm256_setzero_ps();
 					int j = 0;
 					for (; j + 7 < head_dim; j += 8)
 					{
-						// Load 8 BF16 keys, convert to F32
 						__m128i bf16_k = _mm_loadu_si128((__m128i *)(k_vec + j));
 						__m256i k_32 = _mm256_cvtepu16_epi32(bf16_k);
 						__m256 k_f32 = _mm256_castsi256_ps(_mm256_slli_epi32(k_32, 16));
-						
-						// Load 8 F32 query values
 						__m256 q_vals = _mm256_loadu_ps(q_for_kv + j);
-						
-						// FMA: sum += q * k
 						sum_vec = _mm256_fmadd_ps(q_vals, k_f32, sum_vec);
 					}
-					
-					// Horizontal sum
 					__m128 lo = _mm256_castps256_ps128(sum_vec);
 					__m128 hi = _mm256_extractf128_ps(sum_vec, 1);
 					lo = _mm_add_ps(lo, hi);
 					lo = _mm_hadd_ps(lo, lo);
 					lo = _mm_hadd_ps(lo, lo);
 					score += _mm_cvtss_f32(lo);
-					
-					// Scalar remainder
 					for (; j < head_dim; j++)
 						score += q_for_kv[j] * bf16_to_float(k_vec[j]);
 				}
-				key_scores[ti] = score;
+				key_scores[ci] = score;
 			}
 			
-			// Select Top-K indices
-			op_topk_select(topk_indices, &score_tensor, attend_k, &t->scratch);
+			// Step 4: Select Top-K from candidates (not from all positions!)
+			int actual_k = (n_candidates < attend_k) ? n_candidates : attend_k;
+			
+			// Simple partial sort to get top-K
+			for (int k = 0; k < actual_k; k++)
+			{
+				int max_idx = k;
+				for (int j = k + 1; j < n_candidates; j++)
+					if (key_scores[j] > key_scores[max_idx])
+						max_idx = j;
+				if (max_idx != k) {
+					float tmp_s = key_scores[k];
+					key_scores[k] = key_scores[max_idx];
+					key_scores[max_idx] = tmp_s;
+					int tmp_p = candidate_positions[k];
+					candidate_positions[k] = candidate_positions[max_idx];
+					candidate_positions[max_idx] = tmp_p;
+				}
+				topk_indices[k] = candidate_positions[k];
+			}
+			attend_k = actual_k;
 		}
 		
 		// Multi-head attention loop (PARALLEL)
@@ -446,6 +521,19 @@ void transformer_backward_step(t_transformer *t, int target_token, int pos)
 	static int nl_step = 0;
 	static int skipped = 0;
 	
+	// NOISE FILTER: Skip tokens where model is completely wrong
+	// Learning from high-loss tokens just corrupts weights (gradient explosion)
+	if (loss > HIGH_LOSS_THRESHOLD) {
+		skipped++;
+		if (nl_step < 5 || nl_step % 20 == 0) {
+			printf("[NL] Step %d: Loss=%.2f (SKIP - too high, noise) [skipped %d]\n", 
+				nl_step, loss, skipped);
+			fflush(stdout);
+		}
+		nl_step++;
+		return;  // Don't learn from noise!
+	}
+	
 	// SURPRISE-BASED LEARNING: Only learn from "surprising" tokens
 	// If loss < threshold, the model already knew this - skip expensive backward pass
 	if (loss < LEARNING_THRESHOLD) {
@@ -458,6 +546,17 @@ void transformer_backward_step(t_transformer *t, int target_token, int pos)
 		nl_step++;
 		return;  // Skip expensive gradient computation!
 	}
+	
+	// STEP LIMIT: Prevent overfitting/mode collapse by limiting updates per turn
+	static int actual_learn_steps = 0;
+	if (actual_learn_steps >= NL_MAX_STEPS) {
+		if (nl_step < 5 || nl_step % 20 == 0)
+			printf("[NL] Step %d: Loss=%.2f (SKIP - max steps %d reached)\n", 
+				nl_step, loss, NL_MAX_STEPS);
+		nl_step++;
+		return;
+	}
+	actual_learn_steps++;
 	
 	if (nl_step < 5 || nl_step % 20 == 0) {
 		printf("[NL] Step %d: Loss=%.2f, P(target)=%.1f%% [LEARN]\n", nl_step, loss, target_prob * 100);

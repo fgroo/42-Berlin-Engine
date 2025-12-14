@@ -341,6 +341,36 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 		}
 	}
 
+	// ========== LSH LIGHTNING INDEXER INIT ==========
+	// Initialize LSH for true O(K) sparse attention routing
+	// This replaces brute-force O(N) key scanning with hash-based block selection
+	{
+		#include "compute/ops_lsh.h"
+		
+		t_lsh_ctx *lsh_ctx = calloc(1, sizeof(t_lsh_ctx));
+		t_lsh_index *lsh_idx = calloc(1, sizeof(t_lsh_index));
+		
+	if (lsh_ctx && lsh_idx)
+		{
+			// Initialize LSH with head_dim dimension, seed based on config
+			lsh_init(lsh_ctx, t->config.head_dim, 42);
+			lsh_index_init(lsh_idx);  // Initialize hash table with empty buckets
+			
+			t->lsh_ctx = lsh_ctx;
+			t->lsh_index = lsh_idx;
+			t->use_lsh = (t->sparse_k > 0);  // Enable if sparse_k is set
+			
+			printf("LSH Lightning Indexer initialized (dim=%d, %d hash bits, block_size=%d)\n",
+				t->config.head_dim, LSH_NUM_HASHES, LSH_BLOCK_SIZE);
+		}
+		else
+		{
+			t->lsh_ctx = NULL;
+			t->lsh_index = NULL;
+			t->use_lsh = 0;
+		}
+	}
+
 	return (0);
 }
 
@@ -399,4 +429,10 @@ void	transformer_free(t_transformer *t)
 	// Free precomputed RoPE thetas
 	if (t->rope_thetas)
 		free(t->rope_thetas);
+	
+	// Free LSH structures
+	if (t->lsh_ctx)
+		free(t->lsh_ctx);
+	if (t->lsh_index)
+		free(t->lsh_index);
 }

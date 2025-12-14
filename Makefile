@@ -5,7 +5,7 @@ EXTRA_CFLAGS ?=
 # Reasonable LR after adapter wire fix
 FROZEN_LAYERS ?= 22
 SPARSE_K ?= 64
-NESTED_LR ?= 0.001
+NESTED_LR ?= 0.00005
 
 CONFIG_FLAGS = -DFROZEN_LAYERS=$(FROZEN_LAYERS) -DSPARSE_K=$(SPARSE_K) -DNESTED_LR=$(NESTED_LR)f
 CFLAGS = -Wall -Wextra -Werror -O3 -march=native -mavx2 -mfma -fopenmp -Isrc $(CONFIG_FLAGS) $(EXTRA_CFLAGS)
@@ -30,6 +30,7 @@ LIB_SRCS = $(SRC_DIR)/memory/arena.c \
       $(SRC_DIR)/compute/ops_rope.c \
       $(SRC_DIR)/compute/ops_lightning.c \
       $(SRC_DIR)/compute/ops_topk.c \
+      $(SRC_DIR)/compute/ops_lsh.c \
       $(SRC_DIR)/compute/ops_silu.c \
       $(SRC_DIR)/compute/sampler.c \
       $(SRC_DIR)/compute/sampler_temp.c \

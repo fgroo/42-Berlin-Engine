@@ -213,8 +213,15 @@ static int build_chat_tokens(t_tokenizer *tok, const char *user_input, int **out
 	// Official Ministral default system prompt (simplified for concise answers)
 	static const char *sys_prompt = "Be concise. Answer directly with the result.";
 
+	// Add leading space to user input to prevent token merging after [INST]
+	// Without this, "[INST]Sally" becomes malformed tokens → "Ally" hallucination
+	char *spaced_input = malloc(strlen(user_input) + 2);
+	spaced_input[0] = ' ';
+	strcpy(spaced_input + 1, user_input);
+	
 	// Encode user input
-	n_user = tokenizer_encode(tok, user_input, &user_tokens);
+	n_user = tokenizer_encode(tok, spaced_input, &user_tokens);
+	free(spaced_input);
 	if (n_user < 0) return -1;
 	
 	// Encode system prompt on first turn
@@ -325,6 +332,10 @@ static int run_generation(t_transformer *t, t_tokenizer *tok, const char *input_
 	
 	char response_buffer[1024] = {0};
 	int resp_len = 0;
+	
+	// Track generated tokens for repetition penalty
+	int generated_tokens[MAX_GEN_LEN];
+	int n_generated = 0;
 
 	for (int i = 0; i < MAX_GEN_LEN; i++)
 	{
@@ -336,7 +347,7 @@ static int run_generation(t_transformer *t, t_tokenizer *tok, const char *input_
 		logits_tensor.dtype = DTYPE_F32;
 		
 		// REPETITION PENALTY: Discourage repeating recent tokens
-		// Penalize all tokens already in the prompt + generated
+		// Penalize all tokens in prompt + previously generated
 		{
 			float *logits = t->state.logits;
 			// Penalize input tokens
@@ -346,6 +357,14 @@ static int run_generation(t_transformer *t, t_tokenizer *tok, const char *input_
 					logits[tokens[j]] /= REPETITION_PENALTY;
 				else
 					logits[tokens[j]] *= REPETITION_PENALTY;
+			}
+			// Penalize already-generated tokens (prevents "000..." loops)
+			for (int j = 0; j < n_generated; j++)
+			{
+				if (logits[generated_tokens[j]] > 0)
+					logits[generated_tokens[j]] /= REPETITION_PENALTY;
+				else
+					logits[generated_tokens[j]] *= REPETITION_PENALTY;
 			}
 		}
 		
@@ -381,6 +400,10 @@ static int run_generation(t_transformer *t, t_tokenizer *tok, const char *input_
 		next_token = sample_argmax(&logits_tensor);
 		// Original: next_token = sample_top_p(&logits_tensor, TEMPERATURE, TOP_P, sampler_arena);
 		arena_reset(sampler_arena);
+		
+		// Track generated token for repetition penalty
+		if (n_generated < MAX_GEN_LEN)
+			generated_tokens[n_generated++] = next_token;
 		
 		// PROMPT-ONLY LEARNING: Do NOT learn during generation
 		// This prevents self-reinforcing garbage loops
@@ -435,6 +458,17 @@ static int run_generation(t_transformer *t, t_tokenizer *tok, const char *input_
 	// Show persistent state message
 	if (!expected_answer && t->nested_learning) {
 		printf("[State] Fluid Weights UPDATED. Context preserved. Ready for next input.\n");
+		
+		// TRANSIENT LEARNING: Reset fluid weights after each turn
+		// This prevents weight accumulation and mode collapse
+		// The model "forgets" the specialization but keeps KV cache context
+		for (int l = 0; l < t->config.n_layers && t->fluid_layers; l++) {
+			if (t->fluid_layers[l].w2_weight && t->fluid_layers[l].w2_weight->data) {
+				memset(t->fluid_layers[l].w2_weight->data, 0, 
+					t->fluid_layers[l].w2_weight->size * sizeof(uint16_t));
+			}
+		}
+		printf("[State] Fluid Weights RESET (transient mode). Fresh reasoning next turn.\n");
 	}
 
 	if (expected_answer) {

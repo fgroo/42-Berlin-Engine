@@ -13,6 +13,15 @@
 #ifndef CONFIG_H
 # define CONFIG_H
 
+/* Debug mode - comment out for release builds */
+/* #define DEBUG_MODE */
+
+# ifdef DEBUG_MODE
+#  define LOG_DEBUG(...) printf(__VA_ARGS__)
+# else
+#  define LOG_DEBUG(...) ((void)0)
+# endif
+
 # ifndef TEMPERATURE
 #  define TEMPERATURE 0.7f
 # endif
@@ -27,6 +36,10 @@
 
 # ifndef LEARNING_THRESHOLD
 #  define LEARNING_THRESHOLD 2.0f  // Skip tokens where model isn't surprised
+# endif
+
+# ifndef HIGH_LOSS_THRESHOLD
+#  define HIGH_LOSS_THRESHOLD 20.0f  // Allow learning from high-loss tokens (gradient is strongest there)
 # endif
 
 # ifndef GRADIENT_CLIP
@@ -49,10 +62,21 @@
 #  define SPARSE_K 64
 # endif
 
+// Sliding window for hybrid attention - always attend to last W tokens
+// This ensures local reasoning (arithmetic, syntax) works even if LSH misses
+# ifndef ATTN_WINDOW_SIZE
+#  define ATTN_WINDOW_SIZE 128
+# endif
+
 // Layer freezing: Skip updating the first N layers during nested learning
 // With 26 layers, FROZEN_LAYERS=24 means only top 2 layers train (safe!)
 # ifndef FROZEN_LAYERS
 #  define FROZEN_LAYERS 24
+# endif
+
+// Max steps per turn to prevent overfitting and mode collapse
+# ifndef NL_MAX_STEPS
+#  define NL_MAX_STEPS 10
 # endif
 
 #endif

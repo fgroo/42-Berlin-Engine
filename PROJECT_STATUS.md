@@ -98,6 +98,12 @@ src/
 - [x] SGD with gradient clipping
 - [x] Surprise-based learning (skip threshold)
 - [x] Layer freezing (FROZEN_LAYERS)
+- [x] **Nested Learning**
+  - [x] Fluid weights implementation (`fluid.c`)
+  - [x] Forward/Backward pass integration
+  - [x] Persistent memory (fluid weights retained across turns)
+  - [x] Automated Benchmark (`bench_learn.c`)
+  - [x] Interactive Showcase (`raw` mode + `persist`)
 - [x] **Adapter injection in forward pass** ✅
 - [x] KV cache reset preserves fluid weights
 

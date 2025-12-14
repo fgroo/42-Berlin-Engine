@@ -168,7 +168,7 @@ static void	ctx_flush_utf8(t_engine_context *ctx)
 // ==================== TOKEN BUILDING ====================
 
 static int	build_chat_tokens(t_tokenizer *tok, const char *user_input,
-				int **out_tokens, int is_first_turn)
+				int **out_tokens, int is_first_turn, int raw_mode)
 {
 	int			*user_tokens;
 	int			*sys_tokens;
@@ -183,6 +183,15 @@ static int	build_chat_tokens(t_tokenizer *tok, const char *user_input,
 	user_tokens = NULL;
 	sys_tokens = NULL;
 	n_sys = 0;
+	
+	if (raw_mode)
+	{
+		n_user = tokenizer_encode(tok, user_input, &user_tokens);
+		if (n_user < 0) return (-1);
+		*out_tokens = user_tokens;
+		return (n_user);
+	}
+
 	spaced_input = xmalloc(strlen(user_input) + 2);
 	spaced_input[0] = ' ';
 	strcpy(spaced_input + 1, user_input);
@@ -266,7 +275,7 @@ static int	run_generation(t_transformer *t, t_tokenizer *tok,
 
 	tokens = NULL;
 	is_first_turn = (ctx->session_pos == 0) ? 1 : 0;
-	n_tokens = build_chat_tokens(tok, input_text, &tokens, is_first_turn);
+	n_tokens = build_chat_tokens(tok, input_text, &tokens, is_first_turn, t->raw_mode);
 	if (n_tokens < 0)
 		return (0);
 	printf("[DEBUG] Turn %s, pos=%d->%d, tokens=%d\n",
@@ -306,8 +315,8 @@ static int	run_generation(t_transformer *t, t_tokenizer *tok,
 				return (0);
 			}
 		}
-		if (t->nested_learning && i > 0)
-			transformer_backward_step(t, tokens[i], ctx->session_pos + i - 1);
+		if (t->nested_learning)
+			transformer_backward_step(t, tokens[i + 1], ctx->session_pos + i);
 	}
 
 	next_token = tokens[n_tokens - 1];
@@ -393,13 +402,20 @@ static int	run_generation(t_transformer *t, t_tokenizer *tok,
 	if (!expected_answer && t->nested_learning)
 	{
 		printf("[State] Fluid Weights UPDATED. Context preserved.\n");
-		for (int l = 0; l < t->config.n_layers && t->fluid_layers; l++)
+		if (!t->persistent_mode)
 		{
-			if (t->fluid_layers[l].w2_weight && t->fluid_layers[l].w2_weight->data)
-				memset(t->fluid_layers[l].w2_weight->data, 0,
-					t->fluid_layers[l].w2_weight->size * sizeof(uint16_t));
+			for (int l = 0; l < t->config.n_layers && t->fluid_layers; l++)
+			{
+				if (t->fluid_layers[l].w2_weight && t->fluid_layers[l].w2_weight->data)
+					memset(t->fluid_layers[l].w2_weight->data, 0,
+						t->fluid_layers[l].w2_weight->size * sizeof(uint16_t));
+			}
+			printf("[State] Fluid Weights RESET (transient mode).\n");
 		}
-		printf("[State] Fluid Weights RESET (transient mode).\n");
+		else
+		{
+			printf("[State] Fluid Weights PERSISTED (persistent mode).\n");
+		}
 	}
 
 	if (expected_answer)
@@ -460,7 +476,7 @@ int	main(int argc, char **argv)
 	arena_init(&sampler_arena, 4 * 1024 * 1024);
 
 	printf("Chat initialized. Type 'exit' to quit.\n");
-	printf("Commands: 'learn', 'nolearn', 'reset'\n");
+	printf("Commands: 'learn', 'nolearn', 'persist', 'transient', 'reset', 'raw', 'chat'\n");
 
 	while (1)
 	{
@@ -479,6 +495,26 @@ int	main(int argc, char **argv)
 			printf("[MODE] Learning ENABLED.\n");
 			continue ;
 		}
+		if (strcmp(input, "persist") == 0)
+		{
+			t.persistent_mode = 1;
+			printf("[MODE] Persistent Learning ENABLED. Weights will NOT reset.\n");
+			continue ;
+		}
+		if (strcmp(input, "transient") == 0)
+		{
+			t.persistent_mode = 0;
+			// Reset immediately
+			for (int l = 0; l < t.config.n_layers && t.fluid_layers; l++)
+			{
+				if (t.fluid_layers[l].w2_weight && t.fluid_layers[l].w2_weight->data)
+					memset(t.fluid_layers[l].w2_weight->data, 0,
+						t.fluid_layers[l].w2_weight->size * sizeof(uint16_t));
+			}
+			printf("[MODE] Transient Learning ENABLED. Weights reset after turn.\n");
+			continue ;
+		}
+
 		if (strcmp(input, "nolearn") == 0)
 		{
 			t.nested_learning = 0;
@@ -491,6 +527,18 @@ int	main(int argc, char **argv)
 			for (int l = 0; l < t.config.n_layers; l++)
 				t.state.kv_cache[l].current_seq_len = 0;
 			printf("[MODE] Conversation RESET.\n");
+			continue ;
+		}
+		if (strcmp(input, "raw") == 0)
+		{
+			t.raw_mode = 1;
+			printf("[MODE] Raw Completion ENABLED (No Chat Template).\n");
+			continue ;
+		}
+		if (strcmp(input, "chat") == 0)
+		{
+			t.raw_mode = 0;
+			printf("[MODE] Chat Template ENABLED.\n");
 			continue ;
 		}
 		run_generation(&t, &tok, input, NULL, &sampler_arena, &ctx);

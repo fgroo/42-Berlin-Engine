@@ -110,6 +110,8 @@ typedef struct s_transformer
 	int					nl_step;           // Total backward steps
 	int					nl_skipped;        // Skipped steps (low/high loss)
 	int					nl_actual_steps;   // Actual learning steps this turn
+	int		persistent_mode; // 1 = retain fluid weights across turns
+	int		raw_mode;        // 1 = no chat template (raw completion)
 }	t_transformer;
 
 int		transformer_init(t_transformer *t, const char *model_path, const char *config_path);

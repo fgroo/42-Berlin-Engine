@@ -209,6 +209,9 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 	// NESTED LEARNING: Enable test-time training
 	t->nested_learning = 1; // ENABLED with gradient clipping for stability
 	t->nested_lr = NESTED_LR; // From config.h
+	t->nl_step = 0;
+	t->nl_actual_steps = 0;
+	t->nl_skipped = 0;
 	
 	// KV CACHE EVICTION: Auto-evict when cache fills up
 	t->evict_threshold = t->config.seq_len - 128; // Trigger 128 before max

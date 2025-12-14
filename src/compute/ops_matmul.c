@@ -47,16 +47,11 @@ static void	matvec_bf16_f32(float *out, const t_bf16 *a, const float *vec,
 		for (j = 0; j + 7 < k; j += 8)
 		{
 			// Load 8 BF16 values and convert to F32
-			// BF16 to F32: shift left by 16 bits
+			// OPTIMIZED: cvtepu16_epi32 + slli (2 ops vs 4+ ops)
+			// BF16 is upper 16 bits of F32, so shift left by 16
 			__m128i bf16_vals = _mm_loadu_si128((__m128i*)(row + j));
-			
-			// Unpack low 4 BF16 to F32
-			__m128i lo = _mm_unpacklo_epi16(_mm_setzero_si128(), bf16_vals);
-			__m256 f32_lo = _mm256_castps128_ps256(_mm_castsi128_ps(lo));
-			
-			// Unpack high 4 BF16 to F32
-			__m128i hi = _mm_unpackhi_epi16(_mm_setzero_si128(), bf16_vals);
-			f32_lo = _mm256_insertf128_ps(f32_lo, _mm_castsi128_ps(hi), 1);
+			__m256i bf16_32 = _mm256_cvtepu16_epi32(bf16_vals);
+			__m256 f32_lo = _mm256_castsi256_ps(_mm256_slli_epi32(bf16_32, 16));
 			
 			// Load 8 F32 from vec
 			__m256 vec_vals = _mm256_loadu_ps(vec + j);

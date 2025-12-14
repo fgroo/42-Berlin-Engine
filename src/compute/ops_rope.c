@@ -109,6 +109,7 @@ void	op_rope(t_tensor *x, int pos, const t_rope_ctx *ctx_in)
 {
 	t_rope_ctx	ctx;
 	float		thetas[256];
+	float		*thetas_ptr;
 	int			num_vecs;
 	int			half;
 	int			i;
@@ -120,19 +121,31 @@ void	op_rope(t_tensor *x, int pos, const t_rope_ctx *ctx_in)
 	ctx.pos = pos;
 	half = ctx.head_dim / 2;
 	num_vecs = x->size / ctx.head_dim;
-	j = 0;
-	while (j < half)
+	
+	// Use cached thetas if provided, otherwise compute on the fly
+	if (ctx.thetas_cache)
 	{
-		thetas[j] = get_yarn_theta(j * 2, &ctx);
-		j++;
+		thetas_ptr = ctx.thetas_cache;
 	}
+	else
+	{
+		// Fallback: compute thetas (slow path with pow() calls)
+		j = 0;
+		while (j < half)
+		{
+			thetas[j] = get_yarn_theta(j * 2, &ctx);
+			j++;
+		}
+		thetas_ptr = thetas;
+	}
+	
 	i = 0;
 	while (i < num_vecs)
 	{
 		if (x->dtype == DTYPE_F32)
-			rope_apply_f32((float *)x->data + i * ctx.head_dim, &ctx, thetas);
+			rope_apply_f32((float *)x->data + i * ctx.head_dim, &ctx, thetas_ptr);
 		else if (x->dtype == DTYPE_BF16)
-			rope_apply_bf16((t_bf16 *)x->data + i * ctx.head_dim, &ctx, thetas);
+			rope_apply_bf16((t_bf16 *)x->data + i * ctx.head_dim, &ctx, thetas_ptr);
 		i++;
 	}
 }

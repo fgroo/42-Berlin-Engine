@@ -27,6 +27,7 @@ typedef struct s_rope_ctx
 	float	factor;
 	float	mscale;
 	int		orig_ctx;
+	float	*thetas_cache;  // Optional: precomputed thetas [head_dim/2], NULL = compute on the fly
 }	t_rope_ctx;
 
 int		op_matmul(t_tensor *out, const t_tensor *a, const t_tensor *b);

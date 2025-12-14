@@ -288,6 +288,59 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 		t->output_weight_T = NULL;
 	}
 
+	// ========== ROPE THETA PRECOMPUTATION ==========
+	// Precompute YaRN/RoPE thetas once at init to avoid pow() calls per token
+	// thetas[j] = 1.0 / pow(theta_base, j*2 / head_dim) with YaRN adjustments
+	{
+		int half = t->config.head_dim / 2;
+		t->rope_thetas = calloc(half, sizeof(float));
+		if (t->rope_thetas)
+		{
+			float theta_base = t->config.rope_theta;
+			float factor = t->config.rope_factor;
+			float beta_fast = t->config.beta_fast;
+			float beta_slow = t->config.beta_slow;
+			int head_dim = t->config.head_dim;
+			
+			printf("Precomputing RoPE thetas (eliminating %d pow() calls/token)...\n",
+				half * 2 * t->config.n_layers);
+			
+			for (int j = 0; j < half; j++)
+			{
+				int dim_idx = j * 2;
+				float freq_idx = (float)dim_idx / (float)head_dim;
+				float theta;
+				
+				// Standard RoPE formula
+				theta = 1.0f / powf(theta_base, freq_idx);
+				
+				// Apply YaRN scaling if factor > 1.0
+				if (factor > 1.0f)
+				{
+					float slow_thresh = beta_slow / head_dim;
+					float fast_thresh = beta_fast / head_dim;
+					
+					if (freq_idx > fast_thresh)
+					{
+						// High frequency: apply full scaling
+						theta = 1.0f / powf(theta_base * factor, freq_idx);
+					}
+					else if (freq_idx > slow_thresh)
+					{
+						// Ramp region: linear interpolation
+						float alpha = (freq_idx - slow_thresh) / (fast_thresh - slow_thresh);
+						float theta_base_val = 1.0f / powf(theta_base, freq_idx);
+						float theta_scaled = 1.0f / powf(theta_base * factor, freq_idx);
+						theta = (1.0f - alpha) * theta_base_val + alpha * theta_scaled;
+					}
+					// else: Low frequency, keep base theta
+				}
+				t->rope_thetas[j] = theta;
+			}
+			printf("RoPE thetas cached.\n");
+		}
+	}
+
 	return (0);
 }
 
@@ -342,4 +395,8 @@ void	transformer_free(t_transformer *t)
 	// Free transposed output weights
 	if (t->output_weight_T)
 		free(t->output_weight_T);
+	
+	// Free precomputed RoPE thetas
+	if (t->rope_thetas)
+		free(t->rope_thetas);
 }

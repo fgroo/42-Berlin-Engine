@@ -569,8 +569,9 @@ int	tokenizer_encode(t_tokenizer *t, const char *text, int **tokens)
 	return (out_idx);
 }
 
-// Static buffer for decoded tokens (handles Ġ → space conversion)
-static char	g_decode_buf[256];
+// Thread-local buffer for decoded tokens (handles Ġ → space conversion)
+// THREAD-SAFE: Each thread gets its own buffer, no race conditions with OpenMP
+static __thread char	g_decode_buf[256];
 
 const char	*tokenizer_decode(t_tokenizer *t, int token_id)
 {

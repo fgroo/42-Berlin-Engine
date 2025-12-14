@@ -66,6 +66,9 @@ bench_headless: $(LIB_OBJS) src/bench_headless.o
 bench_learn: $(LIB_OBJS) src/bench_learn.o
 	$(CC) $(LIB_OBJS) src/bench_learn.o -o bench_learn -lm $(LDFLAGS)
 
+bench_perf: $(LIB_OBJS) src/bench_perf.o
+	$(CC) $(LIB_OBJS) src/bench_perf.o -o bench_perf -lm $(LDFLAGS)
+
 $(NAME): $(LIB_OBJS) main.o
 	$(CC) $(LIB_OBJS) main.o -o $(NAME) $(LDFLAGS)
 
@@ -73,9 +76,9 @@ $(NAME): $(LIB_OBJS) main.o
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) main.o src/chat.o src/bench_headless.o src/bench_learn.o
+	rm -f $(OBJS) main.o src/chat.o src/bench_headless.o src/bench_learn.o src/bench_perf.o
 
 fclean: clean
-	rm -f $(NAME) chat bench_headless bench_learn
+	rm -f $(NAME) chat bench_headless bench_learn bench_perf
 
 re: fclean all

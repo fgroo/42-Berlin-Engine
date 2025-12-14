@@ -101,6 +101,7 @@ typedef struct s_transformer
 	int						evict_keep_k;
 	t_tensor				evict_weights;
 	t_bf16					*output_weight_T;
+	float				*rope_thetas;      // Precomputed RoPE theta values [head_dim/2]
 	t_vision_tower			*vision;       // NULL = text-only mode (lazy vision)
 }	t_transformer;
 

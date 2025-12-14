@@ -129,7 +129,8 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 			.mscale = (c->mscale == 1.0f && c->rope_factor > 1.0f) 
 					  ? sqrtf(0.1f * logf(c->rope_factor) + 1.0f) 
 					  : c->mscale,
-			.orig_ctx = c->orig_ctx_len
+			.orig_ctx = c->orig_ctx_len,
+			.thetas_cache = t->rope_thetas  // Use precomputed thetas (eliminates pow() per token)
 		};
 		
 
@@ -181,23 +182,51 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 			score_tensor.size = kv_len;
 			score_tensor.dtype = DTYPE_F32;
 			
-			// Score each position by cheap dot product with Q
-			// (Using average head for speed - full Lightning uses learned weights)
+			// SIMD+OpenMP optimized key scoring
+			// NOTE: True Lightning Indexer would use smaller learned weights (d_I << d)
+			// This is a fast approximation using full Q·K with SIMD acceleration
 			t_bf16 *k_data = (t_bf16 *)s->kv_cache[i].k.data;
 			int kv_stride = c->n_kv_heads * c->head_dim;
+			int head_dim = c->head_dim;
 			
+			#pragma omp parallel for schedule(static)
 			for (int ti = 0; ti < kv_len; ti++)
 			{
 				float score = 0.0f;
-				// Sum over KV heads
+				// Sum over KV heads with SIMD
 				for (int kv_h = 0; kv_h < c->n_kv_heads; kv_h++)
 				{
-					t_bf16 *k_vec = k_data + ti * kv_stride + kv_h * c->head_dim;
-					float *q_for_kv = s->q + (kv_h * (c->n_heads/c->n_kv_heads)) * c->head_dim;
-					for (int j = 0; j < c->head_dim; j++)
+					t_bf16 *k_vec = k_data + ti * kv_stride + kv_h * head_dim;
+					float *q_for_kv = s->q + (kv_h * (c->n_heads/c->n_kv_heads)) * head_dim;
+					
+					// AVX2 dot product
+					__m256 sum_vec = _mm256_setzero_ps();
+					int j = 0;
+					for (; j + 7 < head_dim; j += 8)
 					{
-						score += q_for_kv[j] * bf16_to_float(k_vec[j]);
+						// Load 8 BF16 keys, convert to F32
+						__m128i bf16_k = _mm_loadu_si128((__m128i *)(k_vec + j));
+						__m256i k_32 = _mm256_cvtepu16_epi32(bf16_k);
+						__m256 k_f32 = _mm256_castsi256_ps(_mm256_slli_epi32(k_32, 16));
+						
+						// Load 8 F32 query values
+						__m256 q_vals = _mm256_loadu_ps(q_for_kv + j);
+						
+						// FMA: sum += q * k
+						sum_vec = _mm256_fmadd_ps(q_vals, k_f32, sum_vec);
 					}
+					
+					// Horizontal sum
+					__m128 lo = _mm256_castps256_ps128(sum_vec);
+					__m128 hi = _mm256_extractf128_ps(sum_vec, 1);
+					lo = _mm_add_ps(lo, hi);
+					lo = _mm_hadd_ps(lo, lo);
+					lo = _mm_hadd_ps(lo, lo);
+					score += _mm_cvtss_f32(lo);
+					
+					// Scalar remainder
+					for (; j < head_dim; j++)
+						score += q_for_kv[j] * bf16_to_float(k_vec[j]);
 				}
 				key_scores[ti] = score;
 			}
@@ -317,18 +346,46 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 			if (t->nested_learning)
 				memcpy(t->fluid_layers[i].hb_cache, s->hb, c->hidden_dim * sizeof(float));
 			
-			// ALWAYS apply the adapter contribution (trained weights persist!)
+			// SIMD+OpenMP optimized adapter matmul: xb += adapter @ hb
+			// adapter is [dim x hidden_dim] (BF16), hb is [hidden_dim] (F32)
 			t_tensor *adapter = t->fluid_layers[i].w2_weight;
 			t_bf16 *a_data = (t_bf16 *)adapter->data;
-			// Naive matmul: adapter is [dim x hidden_dim], hb is [hidden_dim]
+			int hidden = c->hidden_dim;
+			
+			#pragma omp parallel for schedule(static)
 			for (int row = 0; row < c->dim; row++)
 			{
-				float sum = 0.0f;
-				for (int col = 0; col < c->hidden_dim; col++)
+				t_bf16 *a_row = a_data + row * hidden;
+				__m256 sum_vec = _mm256_setzero_ps();
+				int col = 0;
+				
+				// AVX2 loop: process 8 elements at a time
+				for (; col + 7 < hidden; col += 8)
 				{
-					sum += bf16_to_float(a_data[row * c->hidden_dim + col]) 
-					     * s->hb[col];
+					// Load 8 BF16 weights, convert to F32 (optimized pattern)
+					__m128i bf16_w = _mm_loadu_si128((__m128i *)(a_row + col));
+					__m256i w_32 = _mm256_cvtepu16_epi32(bf16_w);
+					__m256 w_f32 = _mm256_castsi256_ps(_mm256_slli_epi32(w_32, 16));
+					
+					// Load 8 F32 from hb
+					__m256 hb_vals = _mm256_loadu_ps(s->hb + col);
+					
+					// FMA: sum += w * hb
+					sum_vec = _mm256_fmadd_ps(w_f32, hb_vals, sum_vec);
 				}
+				
+				// Horizontal sum of sum_vec
+				__m128 lo = _mm256_castps256_ps128(sum_vec);
+				__m128 hi = _mm256_extractf128_ps(sum_vec, 1);
+				lo = _mm_add_ps(lo, hi);
+				lo = _mm_hadd_ps(lo, lo);
+				lo = _mm_hadd_ps(lo, lo);
+				float sum = _mm_cvtss_f32(lo);
+				
+				// Scalar remainder
+				for (; col < hidden; col++)
+					sum += bf16_to_float(a_row[col]) * s->hb[col];
+				
 				s->xb[row] += sum;
 			}
 		}

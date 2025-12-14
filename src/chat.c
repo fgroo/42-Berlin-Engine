@@ -554,6 +554,9 @@ int main(int argc, char **argv)
 		run_generation(&t, &tok, input, NULL, &sampler_arena);
 	}
 
+	// Clean up all resources - no memory leaks!
+	tokenizer_free(&tok);
+	arena_free(&sampler_arena);
 	transformer_free(&t);
 	return (0);
 }

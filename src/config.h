@@ -23,11 +23,11 @@
 # endif
 
 # ifndef TEMPERATURE
-#  define TEMPERATURE 0.7f
+#  define TEMPERATURE 0.1f  // Cold & Precise for logic tasks
 # endif
 
 # ifndef TOP_P
-#  define TOP_P 0.9f
+#  define TOP_P 0.1f  // Tight nucleus - only best tokens
 # endif
 
 # ifndef NESTED_LR
@@ -55,7 +55,7 @@
 # endif
 
 # ifndef REPETITION_PENALTY
-#  define REPETITION_PENALTY 1.15f
+#  define REPETITION_PENALTY 1.2f  // Against "not a girl, not a girl" loops
 # endif
 
 # ifndef SPARSE_K

@@ -8,6 +8,7 @@
 #include <immintrin.h>  // AVX2 intrinsics
 #include <omp.h>        // OpenMP parallelization
 #include "compute/ops_lsh.h"  // LSH for sparse attention routing
+#include "compute/ops_heap.h"  // Min-heap for O(n log k) Top-K selection
 
 // Helper: Pack 8x 32-bit ints to 8x 16-bit ints (lower 16 bits of each)
 // AVX2 doesn't have direct 256->128 pack, so we extract and combine
@@ -287,27 +288,21 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 				key_scores[ci] = score;
 			}
 			
-			// Step 4: Select Top-K from candidates (not from all positions!)
+			// Step 4: Select Top-K from candidates using MIN-HEAP
+			// Complexity: O(n log k) vs O(n*k) for partial sort
 			int actual_k = (n_candidates < attend_k) ? n_candidates : attend_k;
 			
-			// Simple partial sort to get top-K
-			for (int k = 0; k < actual_k; k++)
-			{
-				int max_idx = k;
-				for (int j = k + 1; j < n_candidates; j++)
-					if (key_scores[j] > key_scores[max_idx])
-						max_idx = j;
-				if (max_idx != k) {
-					float tmp_s = key_scores[k];
-					key_scores[k] = key_scores[max_idx];
-					key_scores[max_idx] = tmp_s;
-					int tmp_p = candidate_positions[k];
-					candidate_positions[k] = candidate_positions[max_idx];
-					candidate_positions[max_idx] = tmp_p;
-				}
-				topk_indices[k] = candidate_positions[k];
-			}
-			attend_k = actual_k;
+			// Allocate heap on scratch arena
+			t_heap_item *heap = arena_alloc(&t->scratch, actual_k * sizeof(t_heap_item));
+			int heap_size = 0;
+			
+			// Build heap with O(n log k) insertion
+			for (int ci = 0; ci < n_candidates; ci++)
+				heap_push(heap, &heap_size, actual_k, key_scores[ci], candidate_positions[ci]);
+			
+			// Extract indices from heap
+			heap_extract_indices(heap, heap_size, topk_indices);
+			attend_k = heap_size;
 		}
 		
 		// Multi-head attention loop (PARALLEL)
@@ -329,17 +324,46 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 			
 			// DEBUG: K cache print (disabled)
 			
-			// Compute attention scores for selected keys only
+			// ========== SIMD-VECTORIZED ATTENTION SCORING ==========
+			// Compute Q·K dot product using AVX2 FMA (8 floats at a time)
+			// This is the hottest loop - ~35% of inference time
+			int head_dim = c->head_dim;
 			for (int ti = 0; ti < attend_k; ti++)
 			{
 				int seq_idx = use_sparse ? topk_indices[ti] : ti;
-				float score = 0.0f;
-				t_bf16 *k_vec = k_data + seq_idx * kv_stride + kv_h * c->head_dim;
+				t_bf16 *k_vec = k_data + seq_idx * kv_stride + kv_h * head_dim;
 				
-				for (int j = 0; j < c->head_dim; j++)
+				// AVX2 vectorized dot product
+				__m256 sum_vec = _mm256_setzero_ps();
+				int j = 0;
+				
+				// Process 8 BF16 elements at a time
+				for (; j + 7 < head_dim; j += 8)
 				{
-					score += q_head[j] * bf16_to_float(k_vec[j]);
+					// Load 8 BF16 from K, convert to F32
+					__m128i bf16_k = _mm_loadu_si128((__m128i *)(k_vec + j));
+					__m256i k_32 = _mm256_cvtepu16_epi32(bf16_k);
+					__m256 k_f32 = _mm256_castsi256_ps(_mm256_slli_epi32(k_32, 16));
+					
+					// Load 8 F32 from Q
+					__m256 q_vals = _mm256_loadu_ps(q_head + j);
+					
+					// FMA: sum += q * k
+					sum_vec = _mm256_fmadd_ps(q_vals, k_f32, sum_vec);
 				}
+				
+				// Horizontal sum of 8 floats in sum_vec
+				__m128 lo = _mm256_castps256_ps128(sum_vec);
+				__m128 hi = _mm256_extractf128_ps(sum_vec, 1);
+				lo = _mm_add_ps(lo, hi);
+				lo = _mm_hadd_ps(lo, lo);
+				lo = _mm_hadd_ps(lo, lo);
+				float score = _mm_cvtss_f32(lo);
+				
+				// Scalar remainder (for head_dim not divisible by 8)
+				for (; j < head_dim; j++)
+					score += q_head[j] * bf16_to_float(k_vec[j]);
+				
 				scores[ti] = score * scale;
 			}
 			
@@ -363,19 +387,42 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 			
 
 			
-			// Weighted sum over selected keys only
-			float *out_head = s->hb + h * c->head_dim;
+			// ========== SIMD-VECTORIZED WEIGHTED SUM ==========
+			// Compute out += weight * V using AVX2 FMA (8 floats at a time)
+			// This is the second hottest loop - ~25% of inference time
+			float *out_head = s->hb + h * head_dim;
 			
 			for (int ti = 0; ti < attend_k; ti++)
 			{
 				int seq_idx = use_sparse ? topk_indices[ti] : ti;
 				float weight = scores[ti];
-				t_bf16 *v_vec = v_data + seq_idx * kv_stride + kv_h * c->head_dim;
+				t_bf16 *v_vec = v_data + seq_idx * kv_stride + kv_h * head_dim;
 				
-				for (int j = 0; j < c->head_dim; j++)
+				// Broadcast weight to all 8 lanes
+				__m256 w_vec = _mm256_set1_ps(weight);
+				int j = 0;
+				
+				// Process 8 elements at a time
+				for (; j + 7 < head_dim; j += 8)
 				{
-					out_head[j] += weight * bf16_to_float(v_vec[j]);
+					// Load 8 BF16 from V, convert to F32
+					__m128i bf16_v = _mm_loadu_si128((__m128i *)(v_vec + j));
+					__m256i v_32 = _mm256_cvtepu16_epi32(bf16_v);
+					__m256 v_f32 = _mm256_castsi256_ps(_mm256_slli_epi32(v_32, 16));
+					
+					// Load current output
+					__m256 out_vals = _mm256_loadu_ps(out_head + j);
+					
+					// FMA: out += weight * v
+					out_vals = _mm256_fmadd_ps(w_vec, v_f32, out_vals);
+					
+					// Store back
+					_mm256_storeu_ps(out_head + j, out_vals);
 				}
+				
+				// Scalar remainder
+				for (; j < head_dim; j++)
+					out_head[j] += weight * bf16_to_float(v_vec[j]);
 			}
 		}
 		
@@ -518,51 +565,48 @@ void transformer_backward_step(t_transformer *t, int target_token, int pos)
 	
 	// Cross-entropy loss = -log(target_prob)
 	float loss = -logf(target_prob + 1e-8f);
-	static int nl_step = 0;
-	static int skipped = 0;
 	
 	// NOISE FILTER: Skip tokens where model is completely wrong
 	// Learning from high-loss tokens just corrupts weights (gradient explosion)
 	if (loss > HIGH_LOSS_THRESHOLD) {
-		skipped++;
-		if (nl_step < 5 || nl_step % 20 == 0) {
+		t->nl_skipped++;
+		if (t->nl_step < 5 || t->nl_step % 20 == 0) {
 			printf("[NL] Step %d: Loss=%.2f (SKIP - too high, noise) [skipped %d]\n", 
-				nl_step, loss, skipped);
+				t->nl_step, loss, t->nl_skipped);
 			fflush(stdout);
 		}
-		nl_step++;
+		t->nl_step++;
 		return;  // Don't learn from noise!
 	}
 	
 	// SURPRISE-BASED LEARNING: Only learn from "surprising" tokens
 	// If loss < threshold, the model already knew this - skip expensive backward pass
 	if (loss < LEARNING_THRESHOLD) {
-		skipped++;
-		if (nl_step < 5 || nl_step % 20 == 0) {
+		t->nl_skipped++;
+		if (t->nl_step < 5 || t->nl_step % 20 == 0) {
 			printf("[NL] Step %d: Loss=%.2f (SKIP - below threshold) [skipped %d]\n", 
-				nl_step, loss, skipped);
+				t->nl_step, loss, t->nl_skipped);
 			fflush(stdout);
 		}
-		nl_step++;
+		t->nl_step++;
 		return;  // Skip expensive gradient computation!
 	}
 	
 	// STEP LIMIT: Prevent overfitting/mode collapse by limiting updates per turn
-	static int actual_learn_steps = 0;
-	if (actual_learn_steps >= NL_MAX_STEPS) {
-		if (nl_step < 5 || nl_step % 20 == 0)
+	if (t->nl_actual_steps >= NL_MAX_STEPS) {
+		if (t->nl_step < 5 || t->nl_step % 20 == 0)
 			printf("[NL] Step %d: Loss=%.2f (SKIP - max steps %d reached)\n", 
-				nl_step, loss, NL_MAX_STEPS);
-		nl_step++;
+				t->nl_step, loss, NL_MAX_STEPS);
+		t->nl_step++;
 		return;
 	}
-	actual_learn_steps++;
+	t->nl_actual_steps++;
 	
-	if (nl_step < 5 || nl_step % 20 == 0) {
-		printf("[NL] Step %d: Loss=%.2f, P(target)=%.1f%% [LEARN]\n", nl_step, loss, target_prob * 100);
+	if (t->nl_step < 5 || t->nl_step % 20 == 0) {
+		printf("[NL] Step %d: Loss=%.2f, P(target)=%.1f%% [LEARN]\n", t->nl_step, loss, target_prob * 100);
 		fflush(stdout);
 	}
-	nl_step++;
+	t->nl_step++;
 	
 	// 2. Backprop through output layer to get grad_x
 	// grad_x = output_weight^T @ grad_logits

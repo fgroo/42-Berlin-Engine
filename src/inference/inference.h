@@ -106,6 +106,10 @@ typedef struct s_transformer
 	void				*lsh_index;        // LSH block index (t_lsh_index*)
 	int					use_lsh;           // Enable LSH-based sparse attention
 	t_vision_tower			*vision;       // NULL = text-only mode (lazy vision)
+	// Nested learning counters (was static - now per-transformer for thread safety)
+	int					nl_step;           // Total backward steps
+	int					nl_skipped;        // Skipped steps (low/high loss)
+	int					nl_actual_steps;   // Actual learning steps this turn
 }	t_transformer;
 
 int		transformer_init(t_transformer *t, const char *model_path, const char *config_path);

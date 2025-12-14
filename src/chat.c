@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   chat.c                                             :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: marvin <marvin@student.42.fr>              +#+  +:+       +#+        */
+/*   By: antigravity <antigravity@student.42.fr>    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2025/12/05 00:00:00 by marvin            #+#    #+#             */
-/*   Updated: 2025/12/05 00:00:00 by marvin           ###   ########.fr       */
+/*   Updated: 2025/12/14 15:00:00 by antigravity      ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -14,6 +14,8 @@
 #include "tokenizer/tokenizer.h"
 #include "compute/sampler.h"
 #include "config.h"
+#include "engine_context.h"
+#include "safe_alloc.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,91 +24,74 @@
 #include <locale.h>
 
 #define MAX_INPUT_LEN 4096
-// MAX_GEN_LEN now in config.h
 #define MAX_TOKENS 8192
 
 // Stop strings for generation (model often doesn't emit EOS)
-// NOTE: Removed "\n\n" - too aggressive, cuts off mid-generation
 static const char *g_stop_strings[] = {
 	"</s>",
 	"User:",
 	"[/INST]",
 	"[INST]",
-	// "\n\n",  // REMOVED: causes premature stop after "Hello!\n\n"
 	"\n\nUser",
 	NULL
 };
 
-// GLOBAL SESSION STATE: Persistent position counter for RoPE continuity
-static int g_session_pos = 0;
-
 // Special token IDs (from tokenizer_config.json)
-#define TOKEN_BOS 1           // <s>
-#define TOKEN_EOS 2           // </s>
-#define TOKEN_INST 3          // [INST]
-#define TOKEN_INST_END 4      // [/INST]
-#define TOKEN_SYS 17          // [SYSTEM_PROMPT]
-#define TOKEN_SYS_END 18      // [/SYSTEM_PROMPT]
-#define TOKEN_THINK 34        // [THINK]
-#define TOKEN_THINK_END 35    // [/THINK]
-
-// Minimal system prompt
-#define SYSTEM_PROMPT ""
+#define TOKEN_BOS 1
+#define TOKEN_EOS 2
+#define TOKEN_INST 3
+#define TOKEN_INST_END 4
+#define TOKEN_SYS 17
+#define TOKEN_SYS_END 18
+#define TOKEN_THINK 34
+#define TOKEN_THINK_END 35
 
 // Trim leading and trailing whitespace in-place
-static void trim_whitespace(char *str)
+static void	trim_whitespace(char *str)
 {
 	char	*start;
 	char	*end;
 	size_t	len;
 
 	if (!str || !str[0])
-		return;
-	// Trim leading whitespace
+		return ;
 	start = str;
-	while (*start && (*start == ' ' || *start == '\t' || *start == '\n' || *start == '\r'))
+	while (*start && (*start == ' ' || *start == '\t'
+			|| *start == '\n' || *start == '\r'))
 		start++;
-	// Trim trailing whitespace
 	len = strlen(start);
 	if (len == 0)
 	{
 		str[0] = '\0';
-		return;
+		return ;
 	}
 	end = start + len - 1;
-	while (end > start && (*end == ' ' || *end == '\t' || *end == '\n' || *end == '\r'))
+	while (end > start && (*end == ' ' || *end == '\t'
+			|| *end == '\n' || *end == '\r'))
 		end--;
-	// Shift to start and null terminate
 	len = end - start + 1;
 	memmove(str, start, len);
 	str[len] = '\0';
 }
 
-// ==================== UTF-8 SAFE PRINT BUFFER ====================
-// LLM tokens can split UTF-8 multi-byte characters across boundaries.
-// This buffer accumulates bytes until complete UTF-8 sequences are formed.
-static unsigned char	g_utf8_buf[256];
-static int				g_utf8_len = 0;
+// ==================== UTF-8 SAFE PRINT (CONTEXT-BASED) ====================
 
-// Returns expected byte count for UTF-8 lead byte
-// Returns 0 for continuation bytes (0x80-0xBF) - these can't start a sequence
 static int	utf8_char_len(unsigned char c)
 {
 	if ((c & 0x80) == 0x00)
-		return (1);  // ASCII
+		return (1);
 	if ((c & 0xC0) == 0x80)
-		return (0);  // Continuation byte - invalid as lead
+		return (0);
 	if ((c & 0xE0) == 0xC0)
 		return (2);
 	if ((c & 0xF0) == 0xE0)
 		return (3);
 	if ((c & 0xF8) == 0xF0)
 		return (4);
-	return (1);  // Invalid, treat as single byte
+	return (1);
 }
 
-// Print as much complete UTF-8 as possible, keep incomplete trailing bytes
-static void	print_token_utf8(const char *piece)
+static void	ctx_print_utf8(t_engine_context *ctx, const char *piece)
 {
 	int				i;
 	int				len;
@@ -117,37 +102,28 @@ static void	print_token_utf8(const char *piece)
 
 	if (!piece || !piece[0])
 		return ;
-	
-	// Add piece to buffer
 	len = strlen(piece);
-	for (i = 0; i < len && g_utf8_len < 250; i++)
-		g_utf8_buf[g_utf8_len++] = (unsigned char)piece[i];
-	
-	// Find how many bytes we can safely print (complete UTF-8 sequences)
+	i = 0;
+	while (i < len && ctx->utf8_len < CTX_UTF8_BUF_SIZE - 6)
+		ctx->utf8_buf[ctx->utf8_len++] = (unsigned char)piece[i++];
 	print_end = 0;
 	i = 0;
-	while (i < g_utf8_len)
+	while (i < ctx->utf8_len)
 	{
-		c = g_utf8_buf[i];
+		c = ctx->utf8_buf[i];
 		expected = utf8_char_len(c);
-		
 		if (expected == 0)
 		{
-			// Orphan continuation byte - skip it
 			i++;
 			print_end = i;
-			continue;
+			continue ;
 		}
-		
-		if (i + expected <= g_utf8_len)
+		if (i + expected <= ctx->utf8_len)
 		{
-			// Check that all continuation bytes are valid
 			int valid = 1;
 			for (j = 1; j < expected && valid; j++)
-			{
-				if ((g_utf8_buf[i + j] & 0xC0) != 0x80)
+				if ((ctx->utf8_buf[i + j] & 0xC0) != 0x80)
 					valid = 0;
-			}
 			if (valid)
 			{
 				i += expected;
@@ -155,114 +131,100 @@ static void	print_token_utf8(const char *piece)
 			}
 			else
 			{
-				// Invalid sequence, skip the lead byte
 				i++;
 				print_end = i;
 			}
 		}
 		else
-		{
-			// Incomplete sequence - stop here, keep for later
-			break;
-		}
+			break ;
 	}
-	
-	// Print complete portion
 	if (print_end > 0)
 	{
-		g_utf8_buf[print_end] = '\0';
-		printf("%s", (char *)g_utf8_buf);
+		ctx->utf8_buf[print_end] = '\0';
+		printf("%s", (char *)ctx->utf8_buf);
 		fflush(stdout);
-		
-		// Shift remaining bytes to start
-		if (print_end < g_utf8_len)
+		if (print_end < ctx->utf8_len)
 		{
-			for (i = 0; i < g_utf8_len - print_end; i++)
-				g_utf8_buf[i] = g_utf8_buf[print_end + i];
-			g_utf8_len -= print_end;
+			for (i = 0; i < ctx->utf8_len - print_end; i++)
+				ctx->utf8_buf[i] = ctx->utf8_buf[print_end + i];
+			ctx->utf8_len -= print_end;
 		}
 		else
-		{
-			g_utf8_len = 0;
-		}
+			ctx->utf8_len = 0;
 	}
 }
 
-// Flush any remaining bytes (call at end of generation)
-static void	flush_utf8_buffer(void)
+static void	ctx_flush_utf8(t_engine_context *ctx)
 {
-	if (g_utf8_len > 0)
+	if (ctx->utf8_len > 0)
 	{
-		g_utf8_buf[g_utf8_len] = '\0';
-		printf("%s", (char *)g_utf8_buf);
+		ctx->utf8_buf[ctx->utf8_len] = '\0';
+		printf("%s", (char *)ctx->utf8_buf);
 		fflush(stdout);
-		g_utf8_len = 0;
+		ctx->utf8_len = 0;
 	}
 }
 
-// Build chat tokens with official Ministral-3B Reasoning format:
-// First turn:  <s>[SYSTEM_PROMPT]{system}[/SYSTEM_PROMPT][INST]{user}[/INST]
-// Later turns: [INST]{user}[/INST] (no BOS, no system prompt)
-static int build_chat_tokens(t_tokenizer *tok, const char *user_input, int **out_tokens, int is_first_turn)
+// ==================== TOKEN BUILDING ====================
+
+static int	build_chat_tokens(t_tokenizer *tok, const char *user_input,
+				int **out_tokens, int is_first_turn)
 {
-	int *user_tokens = NULL;
-	int *sys_tokens = NULL;
-	int n_user, n_sys = 0, total;
-	int i, idx;
-	
-	// Official Ministral default system prompt (simplified for concise answers)
+	int			*user_tokens;
+	int			*sys_tokens;
+	int			n_user;
+	int			n_sys;
+	int			total;
+	int			i;
+	int			idx;
+	char		*spaced_input;
 	static const char *sys_prompt = "Be concise. Answer directly with the result.";
 
-	// Add leading space to user input to prevent token merging after [INST]
-	// Without this, "[INST]Sally" becomes malformed tokens → "Ally" hallucination
-	char *spaced_input = malloc(strlen(user_input) + 2);
+	user_tokens = NULL;
+	sys_tokens = NULL;
+	n_sys = 0;
+	spaced_input = xmalloc(strlen(user_input) + 2);
 	spaced_input[0] = ' ';
 	strcpy(spaced_input + 1, user_input);
-	
-	// Encode user input
 	n_user = tokenizer_encode(tok, spaced_input, &user_tokens);
 	free(spaced_input);
-	if (n_user < 0) return -1;
-	
-	// Encode system prompt on first turn
-	if (is_first_turn) {
-		n_sys = tokenizer_encode(tok, sys_prompt, &sys_tokens);
-		if (n_sys < 0) n_sys = 0;
-	}
-
-	// First turn: BOS + SYS + sys_tokens + SYS_END + INST + user_tokens + INST_END
-	// Later turns: INST + user_tokens + INST_END
+	if (n_user < 0)
+		return (-1);
 	if (is_first_turn)
-		total = 1 + 1 + n_sys + 1 + 1 + n_user + 1; // BOS + SYS + sys + SYS_END + INST + user + INST_END
+	{
+		n_sys = tokenizer_encode(tok, sys_prompt, &sys_tokens);
+		if (n_sys < 0)
+			n_sys = 0;
+	}
+	if (is_first_turn)
+		total = 1 + 1 + n_sys + 1 + 1 + n_user + 1;
 	else
-		total = 1 + n_user + 1;     // INST + user + INST_END
-	
-	*out_tokens = malloc(total * sizeof(int));
-	
+		total = 1 + n_user + 1;
+	*out_tokens = xmalloc(total * sizeof(int));
 	idx = 0;
-	if (is_first_turn) {
-		(*out_tokens)[idx++] = TOKEN_BOS;      // <s>
-		(*out_tokens)[idx++] = TOKEN_SYS;      // [SYSTEM_PROMPT]
+	if (is_first_turn)
+	{
+		(*out_tokens)[idx++] = TOKEN_BOS;
+		(*out_tokens)[idx++] = TOKEN_SYS;
 		for (i = 0; i < n_sys; i++)
 			(*out_tokens)[idx++] = sys_tokens[i];
-		(*out_tokens)[idx++] = TOKEN_SYS_END;  // [/SYSTEM_PROMPT]
+		(*out_tokens)[idx++] = TOKEN_SYS_END;
 	}
-	(*out_tokens)[idx++] = TOKEN_INST;         // [INST]
+	(*out_tokens)[idx++] = TOKEN_INST;
 	for (i = 0; i < n_user; i++)
 		(*out_tokens)[idx++] = user_tokens[i];
-	(*out_tokens)[idx++] = TOKEN_INST_END;     // [/INST]
-	
-	if (sys_tokens) free(sys_tokens);
+	(*out_tokens)[idx++] = TOKEN_INST_END;
+	if (sys_tokens)
+		free(sys_tokens);
 	free(user_tokens);
-	return total;
+	return (total);
 }
 
+// ==================== STOP STRING CHECK ====================
 
-
-// Helper to check for stop strings in accumulated output
-static int check_stop_string(const char *output)
+static int	check_stop_string(const char *output)
 {
-	int i;
+	int	i;
 
 	i = 0;
 	while (g_stop_strings[i])
@@ -274,83 +236,98 @@ static int check_stop_string(const char *output)
 	return (0);
 }
 
-// Helper to run generation
-// Returns 1 if output contains expected_answer (or if expected_answer is NULL), 0 otherwise
-// Uses GLOBAL g_session_pos for RoPE continuity across turns
-static int run_generation(t_transformer *t, t_tokenizer *tok, const char *input_text, const char *expected_answer, t_arena *sampler_arena)
-{
-	int *tokens = NULL;
-	int is_first_turn = (g_session_pos == 0) ? 1 : 0;
-	int n_tokens = build_chat_tokens(tok, input_text, &tokens, is_first_turn);
-	if (n_tokens < 0) return 0;
+// ==================== RESPONSE BUFFER (SAFE) ====================
 
-	// DEBUG: Show position and token info
+static void	ctx_append_response(t_engine_context *ctx, const char *piece)
+{
+	size_t	len;
+
+	len = (size_t)ctx->response_len;
+	safe_strcat(ctx->response_buf, CTX_RESPONSE_BUF_SIZE, piece, &len);
+	ctx->response_len = (int)len;
+}
+
+// ==================== GENERATION ====================
+
+static int	run_generation(t_transformer *t, t_tokenizer *tok,
+				const char *input_text, const char *expected_answer,
+				t_arena *sampler_arena, t_engine_context *ctx)
+{
+	int		*tokens;
+	int		is_first_turn;
+	int		n_tokens;
+	int		next_token;
+	int		pos;
+	int		is_thinking;
+	int		stop_hit;
+	int		generated_tokens[MAX_GEN_LEN];
+	int		n_generated;
+	int		i;
+
+	tokens = NULL;
+	is_first_turn = (ctx->session_pos == 0) ? 1 : 0;
+	n_tokens = build_chat_tokens(tok, input_text, &tokens, is_first_turn);
+	if (n_tokens < 0)
+		return (0);
 	printf("[DEBUG] Turn %s, pos=%d->%d, tokens=%d\n",
 		is_first_turn ? "FIRST" : "CONT",
-		g_session_pos, g_session_pos + n_tokens, n_tokens);
-	// Show first 5 tokens AND the last token (should be Token 4 = [/INST])
-	printf("[DEBUG] Tokens: [%d, %d, %d, %d, %d ... LAST=%d] (1=BOS, 3=INST, 4=/INST)\n",
-		tokens[0], tokens[1], n_tokens > 2 ? tokens[2] : -1, 
+		ctx->session_pos, ctx->session_pos + n_tokens, n_tokens);
+	printf("[DEBUG] Tokens: [%d, %d, %d, %d, %d ... LAST=%d]\n",
+		tokens[0], tokens[1], n_tokens > 2 ? tokens[2] : -1,
 		n_tokens > 3 ? tokens[3] : -1, n_tokens > 4 ? tokens[4] : -1,
 		tokens[n_tokens - 1]);
 	fflush(stdout);
-
-	if (expected_answer) printf("Sanity Check: %s\n", input_text);
-	else printf("\033[90m[Thinking] ");
-
+	if (expected_answer)
+		printf("Sanity Check: %s\n", input_text);
+	else
+		printf("\033[90m[Thinking] ");
 	fflush(stdout);
 
-	// Prefill: Start from current session position
-	for (int i = 0; i < n_tokens - 1; i++)
+	// CRITICAL: Reset ALL per-turn learning counters!
+	// Without this, counters keep incrementing across turns
+	t->nl_step = 0;           // Display counter
+	t->nl_skipped = 0;        // Skipped counter
+	t->nl_actual_steps = 0;   // Per-turn budget counter
+
+	// Prefill
+	for (i = 0; i < n_tokens - 1; i++)
 	{
-		transformer_forward(t, tokens[i], g_session_pos + i);
-		
-		// Sanity check for NaN on first token
+		transformer_forward(t, tokens[i], ctx->session_pos + i);
 		if (i == 0)
 		{
 			float max_val = -INFINITY;
-			for (int v = 0; v < t->config.vocab_size; v++) {
-				if (t->state.logits[v] > max_val) {
+			for (int v = 0; v < t->config.vocab_size; v++)
+				if (t->state.logits[v] > max_val)
 					max_val = t->state.logits[v];
-				}
-			}
-			if (isnan(max_val)) {
+			if (isnan(max_val))
+			{
 				printf("FATAL: Logits contain NaN! Aborting.\n");
-				exit(1);
+				free(tokens);
+				return (0);
 			}
 		}
-
 		if (t->nested_learning && i > 0)
-			transformer_backward_step(t, tokens[i], g_session_pos + i - 1);
+			transformer_backward_step(t, tokens[i], ctx->session_pos + i - 1);
 	}
 
-	int next_token = tokens[n_tokens - 1];
-	// Use global position for RoPE continuity!
-	int pos = g_session_pos + n_tokens - 1;
-	int is_thinking = 1;
-	int stop_hit = 0;
-	
-	char response_buffer[1024] = {0};
-	int resp_len = 0;
-	
-	// Track generated tokens for repetition penalty
-	int generated_tokens[MAX_GEN_LEN];
-	int n_generated = 0;
+	next_token = tokens[n_tokens - 1];
+	pos = ctx->session_pos + n_tokens - 1;
+	is_thinking = 1;
+	stop_hit = 0;
+	n_generated = 0;
+	ctx_reset_response(ctx);
 
-	for (int i = 0; i < MAX_GEN_LEN; i++)
+	for (i = 0; i < MAX_GEN_LEN; i++)
 	{
 		transformer_forward(t, next_token, pos);
-		
 		t_tensor logits_tensor;
 		logits_tensor.data = t->state.logits;
 		logits_tensor.size = t->config.vocab_size;
 		logits_tensor.dtype = DTYPE_F32;
-		
-		// REPETITION PENALTY: Discourage repeating recent tokens
-		// Penalize all tokens in prompt + previously generated
+
+		// Repetition penalty
 		{
 			float *logits = t->state.logits;
-			// Penalize input tokens
 			for (int j = 0; j < n_tokens; j++)
 			{
 				if (logits[tokens[j]] > 0)
@@ -358,7 +335,6 @@ static int run_generation(t_transformer *t, t_tokenizer *tok, const char *input_
 				else
 					logits[tokens[j]] *= REPETITION_PENALTY;
 			}
-			// Penalize already-generated tokens (prevents "000..." loops)
 			for (int j = 0; j < n_generated; j++)
 			{
 				if (logits[generated_tokens[j]] > 0)
@@ -367,228 +343,159 @@ static int run_generation(t_transformer *t, t_tokenizer *tok, const char *input_
 					logits[generated_tokens[j]] *= REPETITION_PENALTY;
 			}
 		}
-		
-		// DEBUG: Show top-5 logits to diagnose model collapse
-		if (i < 3) {
-			float *logits = t->state.logits;
-			int top5[5] = {0,0,0,0,0};
-			float top5_val[5] = {-1e9,-1e9,-1e9,-1e9,-1e9};
-			for (int j = 0; j < t->config.vocab_size; j++) {
-				if (logits[j] > top5_val[4]) {
-					top5_val[4] = logits[j]; top5[4] = j;
-					// Bubble sort into place
-					for (int k = 3; k >= 0; k--) {
-						if (top5_val[k+1] > top5_val[k]) {
-							float tv = top5_val[k]; int ti = top5[k];
-							top5_val[k] = top5_val[k+1]; top5[k] = top5[k+1];
-							top5_val[k+1] = tv; top5[k+1] = ti;
-						}
-					}
-				}
-			}
-			printf("[LOGITS] Top5: %d(%.1f) %d(%.1f) %d(%.1f) %d(%.1f) %d(%.1f)\n",
-				top5[0], top5_val[0], top5[1], top5_val[1], top5[2], top5_val[2],
-				top5[3], top5_val[3], top5[4], top5_val[4]);
-			fflush(stdout);
-		}
-		
-		// BLOCK TOKEN 0 (UNK): Mask it to -inf before sampling
-		// UNK corrupts the latent space and causes model collapse
+
+		// Block UNK token
 		t->state.logits[0] = -1e9f;
-		
-		// GREEDY SAMPLING (DEBUG MODE) - use argmax instead of top_p
+
 		next_token = sample_argmax(&logits_tensor);
-		// Original: next_token = sample_top_p(&logits_tensor, TEMPERATURE, TOP_P, sampler_arena);
 		arena_reset(sampler_arena);
-		
-		// Track generated token for repetition penalty
+
 		if (n_generated < MAX_GEN_LEN)
 			generated_tokens[n_generated++] = next_token;
-		
-		// PROMPT-ONLY LEARNING: Do NOT learn during generation
-		// This prevents self-reinforcing garbage loops
-		// Learning happens in prefill phase only (lines 101-102)
 
-		if (next_token == TOKEN_EOS || stop_hit) break;
-		
+		if (next_token == TOKEN_EOS || stop_hit)
+			break ;
+
 		if (next_token == TOKEN_THINK_END && is_thinking)
 		{
 			is_thinking = 0;
-			flush_utf8_buffer();
-			if (!expected_answer) printf("\033[0m\n[Answer] ");
+			ctx_flush_utf8(ctx);
+			if (!expected_answer)
+				printf("\033[0m\n[Answer] ");
 			fflush(stdout);
 			pos++;
-			continue;
+			continue ;
 		}
 
 		const char *piece = tokenizer_decode(tok, next_token);
-		if (piece) {
-			if (!is_thinking && expected_answer) {
-				// Accumulate response for checking
-				strncat(response_buffer, piece, sizeof(response_buffer) - resp_len - 1);
-				resp_len += strlen(piece);
-			}
-			if (!expected_answer) {
-				print_token_utf8(piece);
-				// Accumulate for stop string detection
-				if (resp_len < (int)sizeof(response_buffer) - 1) {
-					strncat(response_buffer, piece, sizeof(response_buffer) - resp_len - 1);
-					resp_len += strlen(piece);
-				}
-				// Check for stop strings
-				if (check_stop_string(response_buffer))
+		if (piece)
+		{
+			if (!is_thinking && expected_answer)
+				ctx_append_response(ctx, piece);
+			if (!expected_answer)
+			{
+				ctx_print_utf8(ctx, piece);
+				ctx_append_response(ctx, piece);
+				if (check_stop_string(ctx->response_buf))
 					stop_hit = 1;
 			}
 		}
-		
 		pos++;
 	}
-	
-	flush_utf8_buffer();
-	if (!expected_answer) printf("\033[0m\n");
-	
-	// UPDATE GLOBAL SESSION POSITION for next turn!
-	g_session_pos = pos + 1;
-	
+
+	ctx_flush_utf8(ctx);
+	if (!expected_answer)
+		printf("\033[0m\n");
+
+	ctx->session_pos = pos + 1;
 	free(tokens);
-	
-	// KEEP KV CACHE for multi-turn conversation context!
-	// Do NOT reset: t->state.kv_cache[l].current_seq_len = 0;
-	
-	// Show persistent state message
-	if (!expected_answer && t->nested_learning) {
-		printf("[State] Fluid Weights UPDATED. Context preserved. Ready for next input.\n");
-		
-		// TRANSIENT LEARNING: Reset fluid weights after each turn
-		// This prevents weight accumulation and mode collapse
-		// The model "forgets" the specialization but keeps KV cache context
-		for (int l = 0; l < t->config.n_layers && t->fluid_layers; l++) {
-			if (t->fluid_layers[l].w2_weight && t->fluid_layers[l].w2_weight->data) {
-				memset(t->fluid_layers[l].w2_weight->data, 0, 
+
+	if (!expected_answer && t->nested_learning)
+	{
+		printf("[State] Fluid Weights UPDATED. Context preserved.\n");
+		for (int l = 0; l < t->config.n_layers && t->fluid_layers; l++)
+		{
+			if (t->fluid_layers[l].w2_weight && t->fluid_layers[l].w2_weight->data)
+				memset(t->fluid_layers[l].w2_weight->data, 0,
 					t->fluid_layers[l].w2_weight->size * sizeof(uint16_t));
-			}
 		}
-		printf("[State] Fluid Weights RESET (transient mode). Fresh reasoning next turn.\n");
+		printf("[State] Fluid Weights RESET (transient mode).\n");
 	}
 
-	if (expected_answer) {
-		printf("Output: %s\n", response_buffer);
-		if (strstr(response_buffer, expected_answer)) return 1;
-		return 0;
+	if (expected_answer)
+	{
+		printf("Output: %s\n", ctx->response_buf);
+		if (strstr(ctx->response_buf, expected_answer))
+			return (1);
+		return (0);
 	}
-	return 1;
+	return (1);
 }
 
-int main(int argc, char **argv)
+// ==================== MAIN ====================
+
+int	main(int argc, char **argv)
 {
+	t_transformer		t;
+	t_tokenizer			tok;
+	t_arena				sampler_arena;
+	t_engine_context	ctx;
+	char				input[MAX_INPUT_LEN];
+	char				tokenizer_path[1024];
+	char				*p;
+
 	if (argc != 3)
 	{
 		fprintf(stderr, "Usage: %s <model_path> <config_path>\n", argv[0]);
 		return (1);
 	}
-
-	// Enable UTF-8 output - try explicit UTF-8 locale
 	if (!setlocale(LC_ALL, "en_US.UTF-8"))
-	{
 		if (!setlocale(LC_ALL, "C.UTF-8"))
-		{
 			setlocale(LC_ALL, "");
-			fprintf(stderr, "Warning: UTF-8 locale not available. German chars may break.\n");
-		}
-	}
 
-	const char *model_path = argv[1];
-	const char *config_path = argv[2];
+	// Initialize context (replaces all globals!)
+	ctx_init(&ctx);
 
-	// Initialize Transformer
-	t_transformer t;
 	printf("Initializing model...\n");
-	if (transformer_init(&t, model_path, config_path) != 0)
+	if (transformer_init(&t, argv[1], argv[2]) != 0)
 	{
 		fprintf(stderr, "Failed to initialize transformer\n");
 		return (1);
 	}
-	
-	
-	// Nested learning now enabled in model.c
 
-	// Initialize Tokenizer
-	t_tokenizer tok;
 	printf("Initializing tokenizer...\n");
-	char tokenizer_path[1024];
-	snprintf(tokenizer_path, sizeof(tokenizer_path), "%s", config_path);
-	char *p = strrchr(tokenizer_path, '/');
-	if (p) strcpy(p + 1, "tokenizer.json");
-	else strcpy(tokenizer_path, "tokenizer.json");
-
+	snprintf(tokenizer_path, sizeof(tokenizer_path), "%s", argv[2]);
+	p = strrchr(tokenizer_path, '/');
+	if (p)
+		strcpy(p + 1, "tokenizer.json");
+	else
+		strcpy(tokenizer_path, "tokenizer.json");
 	if (tokenizer_init(&tok, tokenizer_path) != 0)
 	{
-		fprintf(stderr, "Failed to initialize tokenizer from %s\n", tokenizer_path);
+		fprintf(stderr, "Failed to initialize tokenizer from %s\n",
+			tokenizer_path);
 		return (1);
 	}
 
-	// Initialize Sampler Scratch Arena
-	t_arena sampler_arena;
 	arena_init(&sampler_arena, 4 * 1024 * 1024);
-	
-	// DEBUG: Tokenizer check
-	{
-		int *debug_tokens = NULL;
-		int n_debug = tokenizer_encode(&tok, "13 * 3", &debug_tokens);
-		printf("Debug Token IDs for '13 * 3': ");
-		for (int di = 0; di < n_debug; di++) printf("%d ", debug_tokens[di]);
-		printf("\n");
-		if (debug_tokens) free(debug_tokens);
-	}
-
-	// SANITY CHECK (disabled - go straight to chat)
-	// printf("Running Sanity Check...\n");
-	// if (!run_generation(&t, &tok, "What is 1 + 1?", "2", &sampler_arena))
-	// {
-	// 	fprintf(stderr, "Sanity Check Failed! Output did not contain '2'.\n");
-	// 	return (1);
-	// }
-	// printf("Sanity Check Passed!\n");
 
 	printf("Chat initialized. Type 'exit' to quit.\n");
-	printf("Commands: 'learn' (enable), 'nolearn' (disable), 'reset' (new conversation)\n");
+	printf("Commands: 'learn', 'nolearn', 'reset'\n");
 
-	char input[MAX_INPUT_LEN];
-	
 	while (1)
 	{
 		printf("\nUser: ");
-		if (!fgets(input, sizeof(input), stdin)) break;
-		
+		if (!fgets(input, sizeof(input), stdin))
+			break ;
 		input[strcspn(input, "\n")] = 0;
-		trim_whitespace(input);  // Remove all leading/trailing whitespace
-		if (input[0] == '\0') continue;  // Skip empty input
-		if (strcmp(input, "exit") == 0) break;
-		
-		// Toggle learning commands
-		if (strcmp(input, "learn") == 0) {
+		trim_whitespace(input);
+		if (input[0] == '\0')
+			continue ;
+		if (strcmp(input, "exit") == 0)
+			break ;
+		if (strcmp(input, "learn") == 0)
+		{
 			t.nested_learning = 1;
-			printf("[MODE] Learning ENABLED. Weights will be updated.\n");
-			continue;
+			printf("[MODE] Learning ENABLED.\n");
+			continue ;
 		}
-		if (strcmp(input, "nolearn") == 0) {
+		if (strcmp(input, "nolearn") == 0)
+		{
 			t.nested_learning = 0;
-			printf("[MODE] Learning DISABLED. Weights frozen.\n");
-			continue;
+			printf("[MODE] Learning DISABLED.\n");
+			continue ;
 		}
-		// Reset conversation (clear position and KV cache)
-		if (strcmp(input, "reset") == 0) {
-			g_session_pos = 0;
+		if (strcmp(input, "reset") == 0)
+		{
+			ctx_reset_conversation(&ctx);
 			for (int l = 0; l < t.config.n_layers; l++)
 				t.state.kv_cache[l].current_seq_len = 0;
-			printf("[MODE] Conversation RESET. KV cache cleared.\n");
-			continue;
+			printf("[MODE] Conversation RESET.\n");
+			continue ;
 		}
-
-		run_generation(&t, &tok, input, NULL, &sampler_arena);
+		run_generation(&t, &tok, input, NULL, &sampler_arena, &ctx);
 	}
 
-	// Clean up all resources - no memory leaks!
 	tokenizer_free(&tok);
 	arena_free(&sampler_arena);
 	transformer_free(&t);

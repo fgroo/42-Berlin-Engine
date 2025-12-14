@@ -33,14 +33,17 @@ LIB_SRCS = $(SRC_DIR)/memory/arena.c \
       $(SRC_DIR)/compute/ops_topk.c \
       $(SRC_DIR)/compute/ops_lsh.c \
       $(SRC_DIR)/compute/ops_silu.c \
+      $(SRC_DIR)/compute/ops_attention.c \
       $(SRC_DIR)/compute/sampler.c \
       $(SRC_DIR)/compute/sampler_temp.c \
       $(SRC_DIR)/compute/sampler_topp.c \
       $(SRC_DIR)/memory/kv_cache.c \
       $(SRC_DIR)/memory/kv_cache_evict.c \
       $(SRC_DIR)/memory/kv_cache_score.c \
+      $(SRC_DIR)/memory/paged.c \
       $(SRC_DIR)/nested/fluid.c \
       $(SRC_DIR)/nested/fluid_backward.c \
+      $(SRC_DIR)/nested/backward.c \
       $(SRC_DIR)/tokenizer/tokenizer.c \
       $(SRC_DIR)/inference/inference.c \
       $(SRC_DIR)/inference/model.c
@@ -71,6 +74,12 @@ bench_learn: $(LIB_OBJS) src/bench_learn.o
 bench_perf: $(LIB_OBJS) src/bench_perf.o
 	$(CC) $(LIB_OBJS) src/bench_perf.o -o bench_perf -lm $(LDFLAGS)
 
+bench_gradient: $(LIB_OBJS) src/bench_gradient.o
+	$(CC) $(LIB_OBJS) src/bench_gradient.o -o bench_gradient -lm $(LDFLAGS)
+
+bench_haystack: $(LIB_OBJS) src/bench_haystack.o
+	$(CC) $(LIB_OBJS) src/bench_haystack.o -o bench_haystack -lm $(LDFLAGS)
+
 $(NAME): $(LIB_OBJS) main.o
 	$(CC) $(LIB_OBJS) main.o -o $(NAME) $(LDFLAGS)
 
@@ -78,9 +87,9 @@ $(NAME): $(LIB_OBJS) main.o
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) main.o src/chat.o src/bench_headless.o src/bench_learn.o src/bench_perf.o
+	rm -f $(OBJS) main.o src/chat.o src/bench_headless.o src/bench_learn.o src/bench_perf.o src/bench_gradient.o src/bench_haystack.o
 
 fclean: clean
-	rm -f $(NAME) chat bench_headless bench_learn bench_perf
+	rm -f $(NAME) chat bench_headless bench_learn bench_perf bench_gradient bench_haystack
 
 re: fclean all

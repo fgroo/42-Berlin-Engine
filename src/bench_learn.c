@@ -53,6 +53,9 @@ static void	run_learning_turn(t_transformer *t, t_tokenizer *tok,
 	/* Reset context for new turn */
 	// ctx->session_pos = 0; // Not used in this bench
 
+	/* CRITICAL: Zero FP32 accumulators before starting */
+	backward_zero_grads(t);
+
 	for (i = 0; i < n_tokens; i++)
 	{
 		int token = tokens[i];
@@ -71,6 +74,9 @@ static void	run_learning_turn(t_transformer *t, t_tokenizer *tok,
 		
 		pos++;
 	}
+	
+	/* CRITICAL: Apply accumulated FP32 gradients to BF16 weights */
+	backward_apply_grads(t, t->nested_lr);
 	
 	printf("Teaching complete. Fluid weights persisted.\n");
 	

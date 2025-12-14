@@ -298,7 +298,10 @@ static int	run_generation(t_transformer *t, t_tokenizer *tok,
 	t->nl_skipped = 0;        // Skipped counter
 	t->nl_actual_steps = 0;   // Per-turn budget counter
 
-	// Prefill
+	// Prefill: Process input tokens WITH learning (proper gradient control now)
+	// NESTED LEARNING: Train on user context to adapt model before responding
+	// Gradients accumulate in FP32, applied with global norm clipping
+	backward_zero_grads(t); // Zero FP32 accumulators at start of turn
 	for (i = 0; i < n_tokens - 1; i++)
 	{
 		transformer_forward(t, tokens[i], ctx->session_pos + i);
@@ -315,9 +318,13 @@ static int	run_generation(t_transformer *t, t_tokenizer *tok,
 				return (0);
 			}
 		}
-		if (t->nested_learning)
+		// NESTED LEARNING: Now safe with global gradient norm clipping
+		if (t->nested_learning && i < n_tokens - 1)
 			transformer_backward_step(t, tokens[i + 1], ctx->session_pos + i);
 	}
+	// Apply accumulated gradients at end of prefill
+	if (t->nested_learning)
+		backward_apply_grads(t, t->nested_lr);
 
 	next_token = tokens[n_tokens - 1];
 	pos = ctx->session_pos + n_tokens - 1;

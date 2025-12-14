@@ -5,6 +5,7 @@
 # include "loader/loader.h"
 # include "tokenizer/tokenizer.h"
 # include "memory/kv_cache.h"
+# include "memory/paged.h"
 # include "memory/arena.h"
 
 typedef struct s_transformer_config
@@ -64,10 +65,12 @@ typedef struct s_inference_state
 
 // =============== NESTED LEARNING ===============
 // Fluid weights = small adapters that learn during inference
+// MIXED PRECISION: Weights in BF16, gradients accumulate in FP32
 typedef struct s_fluid_layer
 {
 	t_tensor	*w2_weight;  // Adapter weight [dim x hidden_dim] (BF16)
-	t_tensor	*w2_grad;    // Adapter gradient [dim x hidden_dim] (BF16)
+	t_tensor	*w2_grad;    // Adapter gradient [dim x hidden_dim] (BF16) - DEPRECATED
+	float		*grad_acc;   // FP32 gradient accumulator [dim x hidden_dim] - CRITICAL!
 	float		*hb_cache;   // Cached hidden activations [hidden_dim] for backprop
 }	t_fluid_layer;
 
@@ -112,6 +115,10 @@ typedef struct s_transformer
 	int					nl_actual_steps;   // Actual learning steps this turn
 	int		persistent_mode; // 1 = retain fluid weights across turns
 	int		raw_mode;        // 1 = no chat template (raw completion)
+	// Paged KV Cache for Sparse Attention (O(K) memory access)
+	t_block_manager		block_manager;     // Block pool for all layers
+	t_paged_kv_cache	*paged_kv;         // Per-layer paged cache views
+	int					use_paged_kv;      // 0 = old linear cache, 1 = paged blocks
 }	t_transformer;
 
 int		transformer_init(t_transformer *t, const char *model_path, const char *config_path);
@@ -122,5 +129,9 @@ void	transformer_backward_step(t_transformer *t, int target_token, int pos);
 // Vision tower control
 int		activate_vision_tower(t_transformer *t);
 void	deactivate_vision_tower(t_transformer *t);
+
+// Backward pass (nested/backward.c) - FP32 gradient accumulation
+void	backward_zero_grads(t_transformer *t);
+void	backward_apply_grads(t_transformer *t, float lr);
 
 #endif

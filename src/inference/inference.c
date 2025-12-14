@@ -9,6 +9,7 @@
 #include <omp.h>        // OpenMP parallelization
 #include "compute/ops_lsh.h"  // LSH for sparse attention routing
 #include "compute/ops_heap.h"  // Min-heap for O(n log k) Top-K selection
+#include "compute/ops_attention.h"  // Flash Attention kernel
 
 // Helper: Pack 8x 32-bit ints to 8x 16-bit ints (lower 16 bits of each)
 // AVX2 doesn't have direct 256->128 pack, so we extract and combine
@@ -139,8 +140,11 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 		op_rope(&q_tensor, pos, &rope_ctx);
 		op_rope(&k_tensor, pos, &rope_ctx);
 
-		// KV Cache Append
-		kv_cache_append(&s->kv_cache[i], &k_tensor, &v_tensor);
+		// KV Cache Append: Use paged or linear based on config
+		if (t->use_paged_kv)
+			paged_kv_append(&t->paged_kv[i], s->k, s->v, pos);
+		else
+			kv_cache_append(&s->kv_cache[i], &k_tensor, &v_tensor);
 		
 		// ========== LSH INDEX UPDATE ==========
 		// Incrementally build block index for true O(K) sparse attention
@@ -304,126 +308,59 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 			heap_extract_indices(heap, heap_size, topk_indices);
 			attend_k = heap_size;
 		}
-		
-		// Multi-head attention loop (PARALLEL)
-		// CRITICAL: Zero hb before accumulating attention output!
-		memset(s->hb, 0, c->n_heads * c->head_dim * sizeof(float));
-		
-		#pragma omp parallel for schedule(dynamic, 1)
-		for (int h = 0; h < c->n_heads; h++)
+		// ========== FLASH ATTENTION ==========
+		// O(head_dim) memory instead of O(seq_len) for scores
+		// Uses online softmax for numerical stability
+		if (t->use_paged_kv)
 		{
-			float *q_head = s->q + h * c->head_dim;
-			int kv_h = h / (c->n_heads / c->n_kv_heads);
+			// PAGED PATH: Block-based iteration
+			float scale = 1.0f / sqrtf((float)c->head_dim);
+			int n_blocks = t->paged_kv[i].n_blocks;
 			
-			float *scores = s->att + h * c->seq_len;
-			float scale = 1.0f / sqrtf(c->head_dim);
+			// Sparse path: If we have more blocks than SPARSE_BLOCKS_K, select top-K
+			#ifndef SPARSE_BLOCKS_K
+			#define SPARSE_BLOCKS_K 8
+			#endif
 			
-			t_bf16 *k_data = (t_bf16 *)s->kv_cache[i].k.data;
-			t_bf16 *v_data = (t_bf16 *)s->kv_cache[i].v.data;
-			int kv_stride = c->n_kv_heads * c->head_dim;
-			
-			// DEBUG: K cache print (disabled)
-			
-			// ========== SIMD-VECTORIZED ATTENTION SCORING ==========
-			// Compute Q·K dot product using AVX2 FMA (8 floats at a time)
-			// This is the hottest loop - ~35% of inference time
-			int head_dim = c->head_dim;
-			for (int ti = 0; ti < attend_k; ti++)
+			if (n_blocks > SPARSE_BLOCKS_K)
 			{
-				int seq_idx = use_sparse ? topk_indices[ti] : ti;
-				t_bf16 *k_vec = k_data + seq_idx * kv_stride + kv_h * head_dim;
+				// SPARSE PAGED PATH: O(K) attention instead of O(N)
+				t_block_score scores[256];  // Stack alloc (max 256 blocks = 4K tokens)
+				int selected[SPARSE_BLOCKS_K + 1];
+				int n_selected;
 				
-				// AVX2 vectorized dot product
-				__m256 sum_vec = _mm256_setzero_ps();
-				int j = 0;
+				// Score blocks using Q·centroid (first query head)
+				score_blocks(scores, s->q, &t->paged_kv[i], n_blocks);
 				
-				// Process 8 BF16 elements at a time
-				for (; j + 7 < head_dim; j += 8)
-				{
-					// Load 8 BF16 from K, convert to F32
-					__m128i bf16_k = _mm_loadu_si128((__m128i *)(k_vec + j));
-					__m256i k_32 = _mm256_cvtepu16_epi32(bf16_k);
-					__m256 k_f32 = _mm256_castsi256_ps(_mm256_slli_epi32(k_32, 16));
-					
-					// Load 8 F32 from Q
-					__m256 q_vals = _mm256_loadu_ps(q_head + j);
-					
-					// FMA: sum += q * k
-					sum_vec = _mm256_fmadd_ps(q_vals, k_f32, sum_vec);
-				}
+				// Select top-K blocks (always includes last block for local window)
+				n_selected = select_top_k_blocks(selected, scores, n_blocks, SPARSE_BLOCKS_K);
 				
-				// Horizontal sum of 8 floats in sum_vec
-				__m128 lo = _mm256_castps256_ps128(sum_vec);
-				__m128 hi = _mm256_extractf128_ps(sum_vec, 1);
-				lo = _mm_add_ps(lo, hi);
-				lo = _mm_hadd_ps(lo, lo);
-				lo = _mm_hadd_ps(lo, lo);
-				float score = _mm_cvtss_f32(lo);
-				
-				// Scalar remainder (for head_dim not divisible by 8)
-				for (; j < head_dim; j++)
-					score += q_head[j] * bf16_to_float(k_vec[j]);
-				
-				scores[ti] = score * scale;
+				// Attend only to selected blocks
+				op_paged_attention_sparse(s->hb, s->q, &t->block_manager,
+					selected, n_selected, c->n_heads, c->n_kv_heads, c->head_dim, scale);
 			}
-			
-
-			
-			// Softmax over attend_k (not kv_len!)
-			float max_val = -INFINITY;
-			for (int ti = 0; ti < attend_k; ti++)
-				if (scores[ti] > max_val) max_val = scores[ti];
-			
-			float sum_exp = 0.0f;
-			for (int ti = 0; ti < attend_k; ti++)
+			else
 			{
-				scores[ti] = expf(scores[ti] - max_val);
-				sum_exp += scores[ti];
+				// DENSE PAGED PATH: Attend to all blocks
+				op_paged_attention(s->hb, s->q, &t->paged_kv[i],
+					c->n_heads, c->n_kv_heads, c->head_dim, scale);
 			}
-			
-			float inv_sum = 1.0f / sum_exp;
-			for (int ti = 0; ti < attend_k; ti++)
-				scores[ti] *= inv_sum;
-			
-
-			
-			// ========== SIMD-VECTORIZED WEIGHTED SUM ==========
-			// Compute out += weight * V using AVX2 FMA (8 floats at a time)
-			// This is the second hottest loop - ~25% of inference time
-			float *out_head = s->hb + h * head_dim;
-			
-			for (int ti = 0; ti < attend_k; ti++)
-			{
-				int seq_idx = use_sparse ? topk_indices[ti] : ti;
-				float weight = scores[ti];
-				t_bf16 *v_vec = v_data + seq_idx * kv_stride + kv_h * head_dim;
-				
-				// Broadcast weight to all 8 lanes
-				__m256 w_vec = _mm256_set1_ps(weight);
-				int j = 0;
-				
-				// Process 8 elements at a time
-				for (; j + 7 < head_dim; j += 8)
-				{
-					// Load 8 BF16 from V, convert to F32
-					__m128i bf16_v = _mm_loadu_si128((__m128i *)(v_vec + j));
-					__m256i v_32 = _mm256_cvtepu16_epi32(bf16_v);
-					__m256 v_f32 = _mm256_castsi256_ps(_mm256_slli_epi32(v_32, 16));
-					
-					// Load current output
-					__m256 out_vals = _mm256_loadu_ps(out_head + j);
-					
-					// FMA: out += weight * v
-					out_vals = _mm256_fmadd_ps(w_vec, v_f32, out_vals);
-					
-					// Store back
-					_mm256_storeu_ps(out_head + j, out_vals);
-				}
-				
-				// Scalar remainder
-				for (; j < head_dim; j++)
-					out_head[j] += weight * bf16_to_float(v_vec[j]);
-			}
+		}
+		else
+		{
+			// LINEAR PATH: Original flat buffer
+			t_attention_params attn = {
+				.q = s->q,
+				.kv_cache = &s->kv_cache[i],
+				.output = s->hb,
+				.n_heads = c->n_heads,
+				.n_kv_heads = c->n_kv_heads,
+				.head_dim = c->head_dim,
+				.scale = 1.0f / sqrtf((float)c->head_dim),
+				.topk_idx = topk_indices,
+				.attend_k = attend_k
+			};
+			op_multihead_attention(&attn);
 		}
 		
 		// Restore scratch arena
@@ -529,229 +466,8 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 	return (s->logits);
 }
 
-// ==================== NESTED LEARNING BACKWARD ====================
-// Compute gradient of cross-entropy loss w.r.t. fluid adapter weights
-// Called after forward pass with the actual target token
-void transformer_backward_step(t_transformer *t, int target_token, int pos)
-{
-	(void)pos; // Currently unused, may be needed for future positional gradients
-	
-	if (!t->nested_learning || !t->fluid_layers)
-		return;
-	
-	t_transformer_config *c = &t->config;
-	t_inference_state *s = &t->state;
-	
-	// 1. Compute softmax probabilities from logits
-	float max_logit = s->logits[0];
-	for (int i = 1; i < c->vocab_size; i++)
-		if (s->logits[i] > max_logit) max_logit = s->logits[i];
-	
-	float sum_exp = 0.0f;
-	for (int i = 0; i < c->vocab_size; i++)
-	{
-		s->logits[i] = expf(s->logits[i] - max_logit);
-		sum_exp += s->logits[i];
-	}
-	
-	// Softmax and gradient of cross-entropy in one pass
-	// grad = softmax(logits) - one_hot(target)
-	float inv_sum = 1.0f / sum_exp;
-	float target_prob = 0.0f;
-	for (int i = 0; i < c->vocab_size; i++)
-		s->logits[i] = s->logits[i] * inv_sum; // Now softmax probs
-	target_prob = s->logits[target_token]; // Probability of correct token
-	s->logits[target_token] -= 1.0f; // Subtract 1 at target position
-	
-	// Cross-entropy loss = -log(target_prob)
-	float loss = -logf(target_prob + 1e-8f);
-	
-	// NOISE FILTER: Skip tokens where model is completely wrong
-	// Learning from high-loss tokens just corrupts weights (gradient explosion)
-	if (loss > HIGH_LOSS_THRESHOLD) {
-		t->nl_skipped++;
-		if (t->nl_step < 5 || t->nl_step % 20 == 0) {
-			printf("[NL] Step %d: Loss=%.2f (SKIP - too high, noise) [skipped %d]\n", 
-				t->nl_step, loss, t->nl_skipped);
-			fflush(stdout);
-		}
-		t->nl_step++;
-		return;  // Don't learn from noise!
-	}
-	
-	// SURPRISE-BASED LEARNING: Only learn from "surprising" tokens
-	// If loss < threshold, the model already knew this - skip expensive backward pass
-	if (loss < LEARNING_THRESHOLD) {
-		t->nl_skipped++;
-		if (t->nl_step < 5 || t->nl_step % 20 == 0) {
-			printf("[NL] Step %d: Loss=%.2f (SKIP - below threshold) [skipped %d]\n", 
-				t->nl_step, loss, t->nl_skipped);
-			fflush(stdout);
-		}
-		t->nl_step++;
-		return;  // Skip expensive gradient computation!
-	}
-	
-	// STEP LIMIT: Prevent overfitting/mode collapse by limiting updates per turn
-	if (t->nl_actual_steps >= NL_MAX_STEPS) {
-		if (t->nl_step < 5 || t->nl_step % 20 == 0)
-			printf("[NL] Step %d: Loss=%.2f (SKIP - max steps %d reached)\n", 
-				t->nl_step, loss, NL_MAX_STEPS);
-		t->nl_step++;
-		return;
-	}
-	t->nl_actual_steps++;
-	
-	if (t->nl_step < 5 || t->nl_step % 20 == 0) {
-		printf("[NL] Step %d: Loss=%.2f, P(target)=%.1f%% [LEARN]\n", t->nl_step, loss, target_prob * 100);
-		fflush(stdout);
-	}
-	t->nl_step++;
-	
-	// 2. Backprop through output layer to get grad_x
-	// grad_x = output_weight^T @ grad_logits
-	// Using pre-transposed weights for row-major (cache-friendly) access
-	memset(s->grad_x, 0, c->dim * sizeof(float));
-	
-	if (t->output_weight_T)
-	{
-		// FAST PATH: Use pre-transposed BF16 weights with SIMD
-		// Layout: output_weight_T[d * vocab + v]
-		int vocab = c->vocab_size;
-		
-		#pragma omp parallel for schedule(static)
-		for (int d = 0; d < c->dim; d++)
-		{
-			t_bf16 *row = t->output_weight_T + d * vocab;
-			__m256 sum_vec = _mm256_setzero_ps();
-			int v = 0;
-			
-			// Process 8 elements at a time with AVX2
-			for (; v + 7 < vocab; v += 8)
-			{
-				// Load 8 BF16 weights, convert to F32
-				__m128i bf16_w = _mm_loadu_si128((__m128i *)(row + v));
-				__m256i w_32 = _mm256_cvtepu16_epi32(bf16_w);
-				w_32 = _mm256_slli_epi32(w_32, 16);
-				__m256 w_f32 = _mm256_castsi256_ps(w_32);
-				
-				// Load 8 F32 logits (grad_logits are in s->logits after softmax)
-				__m256 l_vals = _mm256_loadu_ps(s->logits + v);
-				
-				// FMA: sum += w * logits
-				sum_vec = _mm256_fmadd_ps(w_f32, l_vals, sum_vec);
-			}
-			
-			// Horizontal sum of sum_vec
-			__m128 lo = _mm256_castps256_ps128(sum_vec);
-			__m128 hi = _mm256_extractf128_ps(sum_vec, 1);
-			lo = _mm_add_ps(lo, hi);
-			lo = _mm_hadd_ps(lo, lo);
-			lo = _mm_hadd_ps(lo, lo);
-			float sum = _mm_cvtss_f32(lo);
-			
-			// Scalar remainder
-			for (; v < vocab; v++)
-				sum += bf16_to_float(row[v]) * s->logits[v];
-			
-			s->grad_x[d] = sum;
-		}
-	}
-	else
-	{
-		// FALLBACK: Naive column-major access (slow, but works without transpose)
-		t_bf16 *ow_data = (t_bf16 *)t->weights.output->data;
-		for (int d = 0; d < c->dim; d++)
-		{
-			float sum = 0.0f;
-			for (int v = 0; v < c->vocab_size; v++)
-				sum += bf16_to_float(ow_data[v * c->dim + d]) * s->logits[v];
-			s->grad_x[d] = sum;
-		}
-	}
-	
-	// 3. Update each layer's fluid adapter (reverse order for proper backprop)
-	// Use cached hb_cache per layer (fixed cache miss bug!)
-	// LAYER FREEZING: Skip lower layers to reduce bandwidth, upper layers are smarter
-	
-	for (int layer = c->n_layers - 1; layer >= 0; layer--)
-	{
-		// Skip frozen layers (lower layers typically have less task-specific knowledge)
-		if (layer < FROZEN_LAYERS)
-			continue ;
-		
-		t_fluid_layer *fl = &t->fluid_layers[layer];
-		t_bf16 *w_data = (t_bf16 *)fl->w2_weight->data;
-		float *hb_cached = fl->hb_cache;
-		float lr = t->nested_lr;
-		
-		// SIMD-optimized weight update with gradient clipping (PARALLEL)
-		// Process 8 elements at a time with AVX2
-		#pragma omp parallel for schedule(static)
-		for (int i = 0; i < c->dim; i++)
-		{
-			float grad_xi = s->grad_x[i];
-			
-			// GRADIENT CLIPPING: Prevent exploding gradients
-			if (grad_xi > GRADIENT_CLIP) grad_xi = GRADIENT_CLIP;
-			if (grad_xi < -GRADIENT_CLIP) grad_xi = -GRADIENT_CLIP;
-			
-			__m256 v_grad_xi = _mm256_set1_ps(grad_xi);
-			__m256 v_lr = _mm256_set1_ps(lr);
-			__m256 v_clip_max = _mm256_set1_ps(1.0f);
-			__m256 v_clip_min = _mm256_set1_ps(-1.0f);
-			
-			int j = 0;
-			int row_offset = i * c->hidden_dim;
-			
-			// AVX2 loop: process 8 floats at a time
-			for (; j + 7 < c->hidden_dim; j += 8)
-			{
-				int idx = row_offset + j;
-				
-				// Load 8 hb values (already float)
-				__m256 v_hb = _mm256_loadu_ps(&hb_cached[j]);
-				
-				// Compute gradient: g = grad_x[i] * hb[j]
-				__m256 v_g = _mm256_mul_ps(v_grad_xi, v_hb);
-				
-				// Clip gradient to [-1, 1]
-				v_g = _mm256_min_ps(v_g, v_clip_max);
-				v_g = _mm256_max_ps(v_g, v_clip_min);
-				
-				// Load 8 BF16 weights, convert to FP32
-				// BF16 -> FP32: shift left by 16 bits
-				__m128i bf16_w = _mm_loadu_si128((__m128i*)&w_data[idx]);
-				__m256i w_32 = _mm256_cvtepu16_epi32(bf16_w);
-				w_32 = _mm256_slli_epi32(w_32, 16);  // BF16 in upper 16 bits
-				__m256 v_w = _mm256_castsi256_ps(w_32);
-				
-				// SGD update: w = w - lr * g
-				__m256 v_update = _mm256_fnmadd_ps(v_lr, v_g, v_w);
-				
-				// Convert FP32 back to BF16 with ROUNDING (not truncation!)
-				// Truncation causes gradient drift: 1.99 -> 1, but rounding: 1.99 -> 2
-				// Add 0x8000 (0.5 in the lower 16-bit word) to round to nearest
-				__m256i result_32 = _mm256_castps_si256(v_update);
-				__m256i rounding = _mm256_set1_epi32(0x8000);
-				result_32 = _mm256_add_epi32(result_32, rounding);
-				result_32 = _mm256_srli_epi32(result_32, 16);
-				// Pack 32-bit to 16-bit (only lower 16 bits of each 32-bit element)
-				__m128i result_16 = _mm256_cvtepi32_epi16_custom(result_32);
-				_mm_storeu_si128((__m128i*)&w_data[idx], result_16);
-			}
-			
-			// Scalar fallback for remaining elements
-			for (; j < c->hidden_dim; j++)
-			{
-				float g = grad_xi * hb_cached[j];
-				// Clip gradient
-				if (g > 1.0f) g = 1.0f;
-				if (g < -1.0f) g = -1.0f;
-				int idx = row_offset + j;
-				float w = bf16_to_float(w_data[idx]);
-				w_data[idx] = float_to_bf16(w - lr * g);
-			}
-		}
-	}
-}
+/* NOTE: transformer_backward_step has been moved to src/nested/backward.c
+** with FP32 gradient accumulation for mixed precision training.
+** See backward_zero_grads() and backward_apply_grads() for new API.
+*/
+

@@ -213,6 +213,10 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 	t->nl_actual_steps = 0;
 	t->nl_skipped = 0;
 	
+	// CHAT MODE: Initialize to safe defaults (was uninitialized stack garbage!)
+	t->raw_mode = 0;        // Chat template ENABLED by default
+	t->persistent_mode = 0; // Transient learning by default
+	
 	// KV CACHE EVICTION: Auto-evict when cache fills up
 	t->evict_threshold = t->config.seq_len - 128; // Trigger 128 before max
 	t->evict_keep_k = t->config.seq_len / 2;      // Keep half
@@ -249,6 +253,10 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 		
 		// Allocate hb cache for backprop (stores hidden activations per layer)
 		t->fluid_layers[i].hb_cache = calloc(t->config.hidden_dim, sizeof(float));
+		
+		// FP32 gradient accumulator (CRITICAL: fixes BF16 precision loss!)
+		// Gradients accumulate in FP32, converted to BF16 only on weight update
+		t->fluid_layers[i].grad_acc = calloc(adapter_size, sizeof(float));
 	}
 
 	t->state.kv_cache = calloc(t->config.n_layers, sizeof(t_kv_cache));
@@ -261,6 +269,27 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 	for (int i = 0; i < t->config.n_layers; i++)
 	{
 		kv_cache_init(&t->state.kv_cache[i], &t->kv_arena, &kv_params);
+	}
+	
+	// ========== PAGED KV CACHE (Sparse Attention Foundation) ==========
+	// Initialize block manager for O(K) attention
+	// Blocks: 16 tokens each, head-first layout for SIMD
+	t->use_paged_kv = 1;  // ENABLE paged cache by default for testing
+	if (t->use_paged_kv)
+	{
+		int max_blocks_per_layer = (t->config.seq_len + KV_BLOCK_SIZE - 1) / KV_BLOCK_SIZE;
+		block_manager_init(&t->block_manager, t->config.n_layers,
+			t->config.n_kv_heads, t->config.head_dim, max_blocks_per_layer);
+		
+		// Allocate paged_kv views per layer
+		t->paged_kv = calloc(t->config.n_layers, sizeof(t_paged_kv_cache));
+		for (int i = 0; i < t->config.n_layers; i++)
+		{
+			t->paged_kv[i].bm = &t->block_manager;
+			t->paged_kv[i].layer_idx = i;
+			t->paged_kv[i].n_blocks = 0;
+			t->paged_kv[i].n_tokens = 0;
+		}
 	}
 	
 	// Pre-transpose output weights for fast backward pass (BF16, ~800MB)
@@ -405,6 +434,9 @@ void	transformer_free(t_transformer *t)
 				free(t->fluid_layers[i].w2_grad);
 			}
 			free(t->fluid_layers[i].hb_cache);
+			// Free FP32 gradient accumulator
+			if (t->fluid_layers[i].grad_acc)
+				free(t->fluid_layers[i].grad_acc);
 		}
 		free(t->fluid_layers);
 	}

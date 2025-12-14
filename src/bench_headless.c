@@ -142,7 +142,11 @@ static void run_prompt(t_transformer *t, t_tokenizer *tok, const char *prompt)
 	
 	/* Reset KV cache for next prompt (fresh context) */
 	for (i = 0; i < t->config.n_layers; i++)
+	{
 		t->state.kv_cache[i].current_seq_len = 0;
+		if (t->use_paged_kv)
+			paged_kv_reset(&t->paged_kv[i]);
+	}
 	free(tokens);
 }
 

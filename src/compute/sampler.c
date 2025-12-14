@@ -15,16 +15,23 @@
 #include <math.h>
 #include <time.h>
 
-static int	g_rng_init = 0;
+/*
+** Thread-local RNG state for OpenMP thread safety.
+** Each thread maintains its own initialized state, eliminating race conditions.
+*/
+static __thread int		g_rng_init = 0;
+static __thread unsigned int	g_rng_seed;
 
 float	sampler_random_float(void)
 {
 	if (!g_rng_init)
 	{
-		srand((unsigned int)time(NULL));
+		/* Seed with time + thread-unique value (address of thread-local) */
+		g_rng_seed = (unsigned int)time(NULL) ^ (unsigned int)(size_t)&g_rng_init;
 		g_rng_init = 1;
 	}
-	return ((float)rand() / (float)RAND_MAX);
+	g_rng_seed = g_rng_seed * 1103515245 + 12345;
+	return ((float)((g_rng_seed >> 16) & 0x7FFF) / 32767.0f);
 }
 
 static int	argmax_loop_f32(float *data, size_t n)

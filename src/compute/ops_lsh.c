@@ -231,29 +231,58 @@ void	lsh_update(t_lsh_index *idx, const t_lsh_ctx *ctx,
 }
 
 /*
-** Find candidate blocks whose hash is within Hamming radius
-** Uses hash table for fast lookup + scans nearby buckets
+** Find candidate blocks using BUCKET LOOKUP (not linear scan!)
+** Multi-probe LSH: Check exact bucket + nearby buckets via bit flips
 */
 int	lsh_find_candidates(const t_lsh_index *idx, uint16_t query_hash,
 		int *block_ids, int max_blocks)
 {
-	int	n_found;
-	int	b;
-	int	dist;
+	int			n_found;
+	int			b;
+	int			block_id;
+	int			probe;
+	int			bit;
+	uint16_t	probed_hash;
+	int			bucket;
 
 	n_found = 0;
-	/* Scan all blocks, check Hamming distance */
-	/* TODO: Could optimize with multi-probe LSH table */
-	b = 0;
-	while (b < idx->n_blocks && n_found < max_blocks)
+	
+	/* Multi-probe LSH: probe exact bucket + bit-flip neighbors */
+	/* Probe 0 = exact match, Probes 1-16 = single bit flips */
+	probe = 0;
+	while (probe <= LSH_NUM_HASHES && n_found < max_blocks)
 	{
-		dist = lsh_hamming_distance(query_hash, idx->block_hashes[b]);
-		if (dist <= LSH_HAMMING_RADIUS)
+		if (probe == 0)
+			probed_hash = query_hash;
+		else
 		{
-			block_ids[n_found] = b;
-			n_found++;
+			/* Flip bit (probe-1) to probe nearby buckets */
+			bit = probe - 1;
+			probed_hash = query_hash ^ (1U << bit);
 		}
-		b++;
+		
+		/* O(1) bucket lookup */
+		bucket = probed_hash % LSH_NUM_BUCKETS;
+		block_id = idx->bucket_heads[bucket];
+		
+		/* Traverse chain (average length << n_blocks) */
+		while (block_id != -1 && n_found < max_blocks)
+		{
+			/* Verify Hamming distance (bucket collision possible) */
+			if (lsh_hamming_distance(query_hash, idx->block_hashes[block_id])
+				<= LSH_HAMMING_RADIUS)
+			{
+				/* Check for duplicates (multi-probe may find same block) */
+				int dup = 0;
+				for (b = 0; b < n_found && !dup; b++)
+					if (block_ids[b] == block_id)
+						dup = 1;
+				if (!dup)
+					block_ids[n_found++] = block_id;
+			}
+			block_id = idx->chain_next[block_id];
+		}
+		probe++;
 	}
 	return (n_found);
 }

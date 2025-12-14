@@ -40,6 +40,10 @@ typedef struct s_engine_context
 	int				nl_step;
 	int				nl_skipped;
 	int				nl_learn_steps;
+	
+	/* Thread-safe RNG state (replaces global static) */
+	unsigned int	rng_state;
+	int				rng_init;
 }	t_engine_context;
 
 /*
@@ -53,6 +57,8 @@ static inline void	ctx_init(t_engine_context *ctx)
 	ctx->nl_step = 0;
 	ctx->nl_skipped = 0;
 	ctx->nl_learn_steps = 0;
+	ctx->rng_state = 0;
+	ctx->rng_init = 0;
 }
 
 /*

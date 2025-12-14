@@ -11,6 +11,7 @@
 /* ************************************************************************** */
 
 #include "tokenizer.h"
+#include "../safe_alloc.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -97,9 +98,7 @@ static char	*json_string_decode(const char *s, int len)
 	int		i;
 	int		j;
 
-	res = malloc(len + 1);
-	if (!res)
-		return (NULL);
+	res = xmalloc(len + 1);
 	i = 0;
 	j = 0;
 	while (i < len)
@@ -179,7 +178,7 @@ static void	add_merge(t_tokenizer_internal *ti, char *pair, int rank)
 	t_merge_entry	*entry;
 
 	h = hash_str(pair) % MERGE_HASH_SIZE;
-	entry = malloc(sizeof(t_merge_entry));
+	entry = xmalloc(sizeof(t_merge_entry));
 	entry->pair = strdup(pair);
 	entry->rank = rank;
 	entry->next = ti->merge_map[h];
@@ -223,7 +222,7 @@ static void	add_vocab_hash(t_tokenizer_internal *ti, char *token, int id)
 		}
 		e = e->next;
 	}
-	entry = malloc(sizeof(t_vocab_entry));
+	entry = xmalloc(sizeof(t_vocab_entry));
 	entry->token = token;
 	entry->id = id;
 	entry->next = ti->vocab_map[h];
@@ -255,7 +254,7 @@ static void	parse_vocab(t_tokenizer *t, FILE *f)
 	t_tokenizer_internal	*ti;
 
 	ti = (t_tokenizer_internal *)t->priv;
-	t->vocab = calloc(MAX_VOCAB_SIZE, sizeof(char *));
+	t->vocab = xcalloc(MAX_VOCAB_SIZE, sizeof(char *));
 	t->vocab_size = 0;
 	while (fgets(line, sizeof(line), f))
 	{
@@ -396,12 +395,9 @@ int	tokenizer_init(t_tokenizer *t, const char *json_path)
 	t->eos_id = 2;
 	t->unk_id = 0;
 
-	ti = calloc(1, sizeof(t_tokenizer_internal));
-	if (!ti) { fclose(f); return (-1); }
-	ti->merge_map = calloc(MERGE_HASH_SIZE, sizeof(t_merge_entry *));
-	if (!ti->merge_map) { free(ti); fclose(f); return (-1); }
-	ti->vocab_map = calloc(VOCAB_HASH_SIZE, sizeof(t_vocab_entry *));
-	if (!ti->vocab_map) { free(ti->merge_map); free(ti); fclose(f); return (-1); }
+	ti = xcalloc(1, sizeof(t_tokenizer_internal));
+	ti->merge_map = xcalloc(MERGE_HASH_SIZE, sizeof(t_merge_entry *));
+	ti->vocab_map = xcalloc(VOCAB_HASH_SIZE, sizeof(t_vocab_entry *));
 	t->priv = ti;
 
 	while (fgets(line, sizeof(line), f))
@@ -477,15 +473,16 @@ int	tokenizer_encode(t_tokenizer *t, const char *text, int **tokens)
 	i = 0;
 	while (text[i])
 	{
-		curr = calloc(1, sizeof(t_bpe_token));
+		curr = xcalloc(1, sizeof(t_bpe_token));
 		if (text[i] == ' ')
 		{
 			// Ġ = U+0120 = 0xC4 0xA0 in UTF-8
-			curr->str = strdup("Ġ");
+			curr->str = xmalloc(3);
+			strcpy(curr->str, "Ġ");
 		}
 		else
 		{
-			curr->str = malloc(2);
+			curr->str = xmalloc(2);
 			curr->str[0] = text[i];
 			curr->str[1] = '\0';
 		}
@@ -525,7 +522,7 @@ int	tokenizer_encode(t_tokenizer *t, const char *text, int **tokens)
 
 		// Merge best_pair and best_pair->next
 		t_bpe_token *next = best_pair->next;
-		char *new_str = malloc(strlen(best_pair->str) + strlen(next->str) + 1);
+		char *new_str = xmalloc(strlen(best_pair->str) + strlen(next->str) + 1);
 		strcpy(new_str, best_pair->str);
 		strcat(new_str, next->str);
 		
@@ -550,7 +547,7 @@ int	tokenizer_encode(t_tokenizer *t, const char *text, int **tokens)
 		curr = curr->next;
 	}
 
-	*tokens = malloc(len * sizeof(int));
+	*tokens = xmalloc(len * sizeof(int));
 	int out_idx = 0;
 	
 	curr = head;

@@ -62,6 +62,11 @@
 #  define SPARSE_K 64
 # endif
 
+// Number of blocks to attend to in sparse paged mode
+# ifndef SPARSE_BLOCKS_K
+#  define SPARSE_BLOCKS_K 32
+# endif
+
 // Sliding window for hybrid attention - always attend to last W tokens
 // This ensures local reasoning (arithmetic, syntax) works even if LSH misses
 # ifndef ATTN_WINDOW_SIZE

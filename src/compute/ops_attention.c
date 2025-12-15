@@ -12,6 +12,7 @@
 
 #include "ops_attention.h"
 #include "simd_kernels.h"
+#include "ops_math_fast.h"
 #include <string.h>
 #include <math.h>
 #include <omp.h>
@@ -64,8 +65,8 @@ void	flash_attention_head(float *out, const float *q,
 			max_score = score;
 		else
 			max_score = prev_max;
-		scale_factor = expf(prev_max - max_score);
-		raw_exp = expf(score - max_score);
+		scale_factor = fast_expf(prev_max - max_score);
+		raw_exp = fast_expf(score - max_score);
 		sum_exp = sum_exp * scale_factor + raw_exp;
 		/* 3. Rescale and accumulate output */
 		simd_scale_f32(out, scale_factor, head_dim);
@@ -106,8 +107,8 @@ static void	attention_head_dense(float *out, const float *q,
 			max_score = score;
 		else
 			max_score = prev_max;
-		scale_factor = expf(prev_max - max_score);
-		raw_exp = expf(score - max_score);
+		scale_factor = fast_expf(prev_max - max_score);
+		raw_exp = fast_expf(score - max_score);
 		sum_exp = sum_exp * scale_factor + raw_exp;
 		simd_scale_f32(out, scale_factor, head_dim);
 		simd_fma_bf16_to_f32(out, v_data + t * kv_stride + kv_h * head_dim,
@@ -150,8 +151,8 @@ static void	attention_head_sparse(float *out, const float *q,
 			max_score = score;
 		else
 			max_score = prev_max;
-		scale_factor = expf(prev_max - max_score);
-		raw_exp = expf(score - max_score);
+		scale_factor = fast_expf(prev_max - max_score);
+		raw_exp = fast_expf(score - max_score);
 		sum_exp = sum_exp * scale_factor + raw_exp;
 		simd_scale_f32(out, scale_factor, head_dim);
 		simd_fma_bf16_to_f32(out, v_data + seq_idx * kv_stride + kv_h * head_dim,
@@ -288,8 +289,8 @@ static void	attention_block(float *out, const float *q,
 		prev_max = *max_score;
 		if (score > prev_max)
 			*max_score = score;
-		scale_factor = expf(prev_max - *max_score);
-		raw_exp = expf(score - *max_score);
+		scale_factor = fast_expf(prev_max - *max_score);
+		raw_exp = fast_expf(score - *max_score);
 		*sum_exp = (*sum_exp) * scale_factor + raw_exp;
 		/* Rescale and accumulate output */
 		simd_scale_f32(out, scale_factor, head_dim);

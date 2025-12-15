@@ -44,6 +44,7 @@ LIB_SRCS = $(SRC_DIR)/memory/arena.c \
       $(SRC_DIR)/nested/fluid.c \
       $(SRC_DIR)/nested/fluid_backward.c \
       $(SRC_DIR)/nested/backward.c \
+      $(SRC_DIR)/nested/optimizer.c \
       $(SRC_DIR)/tokenizer/tokenizer.c \
       $(SRC_DIR)/inference/inference.c \
       $(SRC_DIR)/inference/model.c

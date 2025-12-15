@@ -298,33 +298,42 @@ static int	run_generation(t_transformer *t, t_tokenizer *tok,
 	t->nl_skipped = 0;        // Skipped counter
 	t->nl_actual_steps = 0;   // Per-turn budget counter
 
-	// Prefill: Process input tokens WITH learning (proper gradient control now)
-	// NESTED LEARNING: Train on user context to adapt model before responding
-	// Gradients accumulate in FP32, applied with global norm clipping
-	backward_zero_grads(t); // Zero FP32 accumulators at start of turn
-	for (i = 0; i < n_tokens - 1; i++)
-	{
-		transformer_forward(t, tokens[i], ctx->session_pos + i);
-		if (i == 0)
-		{
-			float max_val = -INFINITY;
-			for (int v = 0; v < t->config.vocab_size; v++)
-				if (t->state.logits[v] > max_val)
-					max_val = t->state.logits[v];
-			if (isnan(max_val))
-			{
-				printf("FATAL: Logits contain NaN! Aborting.\n");
-				free(tokens);
-				return (0);
-			}
-		}
-		// NESTED LEARNING: Now safe with global gradient norm clipping
-		if (t->nested_learning && i < n_tokens - 1)
-			transformer_backward_step(t, tokens[i + 1], ctx->session_pos + i);
-	}
-	// Apply accumulated gradients at end of prefill
+	// NESTED LEARNING: Zero FP32 accumulators at start of turn
+	backward_zero_grads(t);
+
+	// Prefill: Use batched prefill for efficiency
+	// For learning, we still need to process tokens sequentially for backprop
 	if (t->nested_learning)
+	{
+		// Sequential path with backward steps (learning enabled)
+		for (i = 0; i < n_tokens - 1; i++)
+		{
+			transformer_forward(t, tokens[i], ctx->session_pos + i);
+			if (i == 0)
+			{
+				float max_val = -INFINITY;
+				for (int v = 0; v < t->config.vocab_size; v++)
+					if (t->state.logits[v] > max_val)
+						max_val = t->state.logits[v];
+				if (isnan(max_val))
+				{
+					printf("FATAL: Logits contain NaN! Aborting.\n");
+					free(tokens);
+					return (0);
+				}
+			}
+			// NESTED LEARNING with global gradient norm clipping
+			transformer_backward_step(t, tokens[i + 1], ctx->session_pos + i);
+		}
+		// Apply accumulated gradients at end of prefill
 		backward_apply_grads(t, t->nested_lr);
+	}
+	else
+	{
+		// Sequential prefill (no learning path)
+		for (i = 0; i < n_tokens - 1; i++)
+			transformer_forward(t, tokens[i], ctx->session_pos + i);
+	}
 
 	next_token = tokens[n_tokens - 1];
 	pos = ctx->session_pos + n_tokens - 1;

@@ -436,4 +436,3 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 ** with FP32 gradient accumulation for mixed precision training.
 ** See backward_zero_grads() and backward_apply_grads() for new API.
 */
-

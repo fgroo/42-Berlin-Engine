@@ -10,6 +10,7 @@
 #include "compute/ops_lsh.h"  // LSH for sparse attention routing
 #include "compute/ops_heap.h"  // Min-heap for O(n log k) Top-K selection
 #include "compute/ops_attention.h"  // Flash Attention kernel
+#include "compute/simd_kernels.h"  // SIMD primitives (simd_dot_bf16_f32, etc.)
 
 // Helper: Pack 8x 32-bit ints to 8x 16-bit ints (lower 16 bits of each)
 // AVX2 doesn't have direct 256->128 pack, so we extract and combine
@@ -88,8 +89,8 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 
 		// [FIX] BUFFER ALIASING BUG
 		// s->hb is shared between Attention (n_heads*head_dim=4096) and FFN (hidden_dim=9216)
-		// We must scrub stale FFN data from previous layer before each iteration!
-		memset(s->hb, 0, c->hidden_dim * sizeof(float));
+		// Only zero the attention output portion - FFN overwrites its own section
+		memset(s->hb, 0, c->n_heads * c->head_dim * sizeof(float));
 		
 		t_layer_weights *l = &t->weights.layers[i];
 		if (!l->wq || !l->wq->data || !l->wk || !l->wk->data || !l->wv || !l->wv->data || !l->wo || !l->wo->data) {
@@ -269,25 +270,7 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 				{
 					t_bf16 *k_vec = k_data + ti * kv_stride + kv_h * head_dim;
 					float *q_for_kv = s->q + (kv_h * (c->n_heads/c->n_kv_heads)) * head_dim;
-					
-					__m256 sum_vec = _mm256_setzero_ps();
-					int j = 0;
-					for (; j + 7 < head_dim; j += 8)
-					{
-						__m128i bf16_k = _mm_loadu_si128((__m128i *)(k_vec + j));
-						__m256i k_32 = _mm256_cvtepu16_epi32(bf16_k);
-						__m256 k_f32 = _mm256_castsi256_ps(_mm256_slli_epi32(k_32, 16));
-						__m256 q_vals = _mm256_loadu_ps(q_for_kv + j);
-						sum_vec = _mm256_fmadd_ps(q_vals, k_f32, sum_vec);
-					}
-					__m128 lo = _mm256_castps256_ps128(sum_vec);
-					__m128 hi = _mm256_extractf128_ps(sum_vec, 1);
-					lo = _mm_add_ps(lo, hi);
-					lo = _mm_hadd_ps(lo, lo);
-					lo = _mm_hadd_ps(lo, lo);
-					score += _mm_cvtss_f32(lo);
-					for (; j < head_dim; j++)
-						score += q_for_kv[j] * bf16_to_float(k_vec[j]);
+					score += simd_dot_bf16_f32(k_vec, q_for_kv, head_dim);
 				}
 				key_scores[ci] = score;
 			}
@@ -325,7 +308,17 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 			if (n_blocks > SPARSE_BLOCKS_K)
 			{
 				// SPARSE PAGED PATH: O(K) attention instead of O(N)
-				t_block_score scores[256];  // Stack alloc (max 256 blocks = 4K tokens)
+				// Arena-allocate scores (safe for infinite context)
+				size_t paged_scratch = t->scratch.offset;
+				t_block_score *scores = arena_alloc(&t->scratch, 
+					n_blocks * sizeof(t_block_score));
+				if (!scores)
+				{
+					// Fallback to dense path if arena exhausted
+					op_paged_attention(s->hb, s->q, &t->paged_kv[i],
+						c->n_heads, c->n_kv_heads, c->head_dim, scale);
+					continue ;
+				}
 				int selected[SPARSE_BLOCKS_K + 1];
 				int n_selected;
 				
@@ -338,6 +331,9 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 				// Attend only to selected blocks
 				op_paged_attention_sparse(s->hb, s->q, &t->block_manager,
 					selected, n_selected, c->n_heads, c->n_kv_heads, c->head_dim, scale);
+				
+				// Restore arena
+				t->scratch.offset = paged_scratch;
 			}
 			else
 			{
@@ -415,37 +411,7 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 			for (int row = 0; row < c->dim; row++)
 			{
 				t_bf16 *a_row = a_data + row * hidden;
-				__m256 sum_vec = _mm256_setzero_ps();
-				int col = 0;
-				
-				// AVX2 loop: process 8 elements at a time
-				for (; col + 7 < hidden; col += 8)
-				{
-					// Load 8 BF16 weights, convert to F32 (optimized pattern)
-					__m128i bf16_w = _mm_loadu_si128((__m128i *)(a_row + col));
-					__m256i w_32 = _mm256_cvtepu16_epi32(bf16_w);
-					__m256 w_f32 = _mm256_castsi256_ps(_mm256_slli_epi32(w_32, 16));
-					
-					// Load 8 F32 from hb
-					__m256 hb_vals = _mm256_loadu_ps(s->hb + col);
-					
-					// FMA: sum += w * hb
-					sum_vec = _mm256_fmadd_ps(w_f32, hb_vals, sum_vec);
-				}
-				
-				// Horizontal sum of sum_vec
-				__m128 lo = _mm256_castps256_ps128(sum_vec);
-				__m128 hi = _mm256_extractf128_ps(sum_vec, 1);
-				lo = _mm_add_ps(lo, hi);
-				lo = _mm_hadd_ps(lo, lo);
-				lo = _mm_hadd_ps(lo, lo);
-				float sum = _mm_cvtss_f32(lo);
-				
-				// Scalar remainder
-				for (; col < hidden; col++)
-					sum += bf16_to_float(a_row[col]) * s->hb[col];
-				
-				s->xb[row] += sum;
+				s->xb[row] += simd_dot_bf16_f32(a_row, s->hb, hidden);
 			}
 		}
 		

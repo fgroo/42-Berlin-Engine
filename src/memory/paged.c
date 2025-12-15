@@ -11,6 +11,7 @@
 /* ************************************************************************** */
 
 #include "paged.h"
+#include "compute/ops_heap.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -21,7 +22,7 @@
 ** ============================================================================
 */
 
-void	block_manager_init(t_block_manager *bm, int n_layers, int n_kv_heads,
+int	block_manager_init(t_block_manager *bm, int n_layers, int n_kv_heads,
 			int head_dim, int max_blocks_per_layer)
 {
 	int		total_blocks;
@@ -32,6 +33,10 @@ void	block_manager_init(t_block_manager *bm, int n_layers, int n_kv_heads,
 	bm->n_kv_heads = n_kv_heads;
 	bm->head_dim = head_dim;
 	bm->max_logical = max_blocks_per_layer;
+	bm->blocks = NULL;
+	bm->page_table = NULL;
+	bm->free_stack = NULL;
+	bm->logical_len = NULL;
 	
 	/* Total physical blocks = layers * max_per_layer */
 	total_blocks = n_layers * max_blocks_per_layer;
@@ -41,8 +46,8 @@ void	block_manager_init(t_block_manager *bm, int n_layers, int n_kv_heads,
 	bm->blocks = calloc(total_blocks, sizeof(t_kv_block));
 	if (!bm->blocks)
 	{
-		fprintf(stderr, "Failed to allocate block pool\n");
-		exit(1);
+		fprintf(stderr, "[PagedKV] ERROR: Failed to allocate block pool\n");
+		return (-1);
 	}
 	
 	/* Size of K or V per block: [n_kv_heads * BLOCK_SIZE * head_dim] */
@@ -57,8 +62,9 @@ void	block_manager_init(t_block_manager *bm, int n_layers, int n_kv_heads,
 		bm->blocks[i].centroid = calloc(head_dim, sizeof(float));
 		if (!bm->blocks[i].k || !bm->blocks[i].v || !bm->blocks[i].centroid)
 		{
-			fprintf(stderr, "Failed to allocate block %d\n", i);
-			exit(1);
+			fprintf(stderr, "[PagedKV] ERROR: Failed to allocate block %d\n", i);
+			block_manager_free(bm);
+			return (-1);
 		}
 		memset(bm->blocks[i].k, 0, block_size_bytes);
 		memset(bm->blocks[i].v, 0, block_size_bytes);
@@ -74,8 +80,9 @@ void	block_manager_init(t_block_manager *bm, int n_layers, int n_kv_heads,
 	bm->page_table = calloc(n_layers * max_blocks_per_layer, sizeof(int));
 	if (!bm->page_table)
 	{
-		fprintf(stderr, "Failed to allocate page table\n");
-		exit(1);
+		fprintf(stderr, "[PagedKV] ERROR: Failed to allocate page table\n");
+		block_manager_free(bm);
+		return (-1);
 	}
 	/* Initialize page table to -1 (unmapped) */
 	i = 0;
@@ -92,8 +99,9 @@ void	block_manager_init(t_block_manager *bm, int n_layers, int n_kv_heads,
 	bm->free_stack = malloc(total_blocks * sizeof(int));
 	if (!bm->free_stack)
 	{
-		fprintf(stderr, "Failed to allocate free stack\n");
-		exit(1);
+		fprintf(stderr, "[PagedKV] ERROR: Failed to allocate free stack\n");
+		block_manager_free(bm);
+		return (-1);
 	}
 	i = 0;
 	while (i < total_blocks)
@@ -105,6 +113,7 @@ void	block_manager_init(t_block_manager *bm, int n_layers, int n_kv_heads,
 	
 	printf("[PagedKV] Initialized: %d blocks, %d layers, %d KV heads, %d head_dim\n",
 		total_blocks, n_layers, n_kv_heads, head_dim);
+	return (0);
 }
 
 void	block_manager_free(t_block_manager *bm)
@@ -191,7 +200,10 @@ void	paged_kv_append(t_paged_kv_cache *pkv, const float *k, const float *v,
 		/* Allocate new physical block */
 		phys_idx = block_alloc(bm);
 		if (phys_idx < 0)
-			return ;
+		{
+			fprintf(stderr, "[PagedKV] FATAL: Block pool exhausted at pos=%d\n", pos);
+			exit(1);
+		}
 		
 		/* Map logical -> physical */
 		bm->page_table[page_table_base + block_idx] = phys_idx;
@@ -387,7 +399,7 @@ void	score_blocks(t_block_score *scores, const float *q,
 }
 
 /*
-** Select top-K blocks using insertion sort (K is small, O(N*K) is fine)
+** Select top-K blocks using MIN-HEAP for O(N log K) complexity
 ** ALWAYS includes:
 ** - Block 0 (prefix anchor - system prompt, initial context)
 ** - Last block (suffix anchor - local window for recency)
@@ -395,14 +407,13 @@ void	score_blocks(t_block_score *scores, const float *q,
 int	select_top_k_blocks(int *selected, t_block_score *scores,
 			int n_blocks, int k)
 {
-	int		actual_k;
-	int		i;
-	int		j;
-	int		min_idx;
-	float	min_score;
-	int		selected_count;
-	int		first_phys;
-	int		last_phys;
+	int			selected_count;
+	int			first_phys;
+	int			last_phys;
+	int			actual_k;
+	int			heap_size;
+	int			i;
+	t_heap_item	heap[64];  /* Max K = 64, stack safe */
 
 	if (n_blocks <= 0)
 		return (0);
@@ -427,44 +438,25 @@ int	select_top_k_blocks(int *selected, t_block_score *scores,
 	actual_k = k - 2;
 	if (actual_k > n_blocks - 2)
 		actual_k = n_blocks - 2;
+	if (actual_k > 62)
+		actual_k = 62;  /* Cap to heap array size */
 	
-	/* Simple selection: find top actual_k scores (middle blocks only) */
-	i = 0;
-	while (i < actual_k)
+	/* BUILD MIN-HEAP: O(N log K) selection of middle blocks */
+	/* Push scores[1..n_blocks-2] into heap, skip anchored first/last */
+	heap_size = 0;
+	i = 1;
+	while (i < n_blocks - 1)
 	{
-		/* Find max score not yet selected (skip first and last) */
-		min_idx = -1;
-		min_score = -1e30f;
-		j = 1;  /* Start at 1 to skip first block */
-		while (j < n_blocks - 1)  /* Stop before last block */
-		{
-			if (scores[j].score > min_score)
-			{
-				/* Check if already selected */
-				int already = 0;
-				int s = 0;
-				while (s < selected_count)
-				{
-					if (selected[s] == scores[j].phys_idx)
-					{
-						already = 1;
-						break ;
-					}
-					s++;
-				}
-				if (!already)
-				{
-					min_idx = j;
-					min_score = scores[j].score;
-				}
-			}
-			j++;
-		}
-		if (min_idx >= 0)
-		{
-			selected[selected_count] = scores[min_idx].phys_idx;
-			selected_count++;
-		}
+		heap_push(heap, &heap_size, actual_k, scores[i].score, i);
+		i++;
+	}
+	
+	/* Extract winning indices from heap */
+	i = 0;
+	while (i < heap_size)
+	{
+		selected[selected_count] = scores[heap[i].index].phys_idx;
+		selected_count++;
 		i++;
 	}
 	return (selected_count);

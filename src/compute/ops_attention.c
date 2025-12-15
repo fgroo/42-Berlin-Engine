@@ -177,7 +177,7 @@ void	op_attention_dense(t_attention_params *p, int kv_len)
 	v_data = (t_bf16 *)p->kv_cache->v.data;
 	kv_stride = p->n_kv_heads * p->head_dim;
 	memset(p->output, 0, p->n_heads * p->head_dim * sizeof(float));
-	#pragma omp parallel for schedule(dynamic, 1) private(kv_h)
+	#pragma omp parallel for schedule(static) private(kv_h)
 	for (h = 0; h < p->n_heads; h++)
 	{
 		kv_h = h / (p->n_heads / p->n_kv_heads);
@@ -204,7 +204,7 @@ void	op_attention_sparse(t_attention_params *p)
 	v_data = (t_bf16 *)p->kv_cache->v.data;
 	kv_stride = p->n_kv_heads * p->head_dim;
 	memset(p->output, 0, p->n_heads * p->head_dim * sizeof(float));
-	#pragma omp parallel for schedule(dynamic, 1) private(kv_h)
+	#pragma omp parallel for schedule(static) private(kv_h)
 	for (h = 0; h < p->n_heads; h++)
 	{
 		kv_h = h / (p->n_heads / p->n_kv_heads);
@@ -377,7 +377,7 @@ void	op_paged_attention(float *output, const float *q,
 	int	kv_h;
 
 	memset(output, 0, n_heads * head_dim * sizeof(float));
-	#pragma omp parallel for schedule(dynamic, 1) private(kv_h)
+	#pragma omp parallel for schedule(static) private(kv_h)
 	for (h = 0; h < n_heads; h++)
 	{
 		kv_h = h / (n_heads / n_kv_heads);
@@ -399,7 +399,7 @@ void	op_paged_attention_sparse(float *output, const float *q,
 	int	kv_h;
 
 	memset(output, 0, n_heads * head_dim * sizeof(float));
-	#pragma omp parallel for schedule(dynamic, 1) private(kv_h)
+	#pragma omp parallel for schedule(static) private(kv_h)
 	for (h = 0; h < n_heads; h++)
 	{
 		kv_h = h / (n_heads / n_kv_heads);

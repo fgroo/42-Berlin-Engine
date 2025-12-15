@@ -17,6 +17,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #define MAX_LINE_LEN 4096
 #define MAX_VOCAB_SIZE 132000
@@ -26,9 +27,9 @@
 // Maps special unicode chars back to byte values (0x00-0xFF)
 // This is the inverse of the bytes_to_unicode() mapping used by HuggingFace tokenizers
 static int	g_byte_decoder[65536];
-static int	g_byte_decoder_init = 0;
+static pthread_once_t	g_byte_decoder_once = PTHREAD_ONCE_INIT;
 
-static void	init_byte_decoder(void)
+static void	init_byte_decoder_impl(void)
 {
 	int	bs[256];
 	int	cs[256];
@@ -37,8 +38,6 @@ static void	init_byte_decoder(void)
 	int	b;
 	int	i;
 
-	if (g_byte_decoder_init)
-		return ;
 	// Initialize printable ASCII ranges that map to themselves
 	n_bs = 0;
 	for (b = '!'; b <= '~'; b++)
@@ -70,7 +69,11 @@ static void	init_byte_decoder(void)
 		g_byte_decoder[i] = -1;  // -1 means not in mapping
 	for (i = 0; i < n_bs; i++)
 		g_byte_decoder[cs[i]] = bs[i];
-	g_byte_decoder_init = 1;
+}
+
+static void	init_byte_decoder(void)
+{
+	pthread_once(&g_byte_decoder_once, init_byte_decoder_impl);
 }
 
 // Decode a unicode codepoint to its byte value (-1 if not mapped)
@@ -442,7 +445,91 @@ typedef struct s_bpe_token
 	char				*str;
 	struct s_bpe_token	*next;
 	struct s_bpe_token	*prev;
+	int					version;  // For invalidation tracking
 }	t_bpe_token;
+
+/*
+** Heap entry for BPE merge prioritization
+** We use a min-heap where lower rank = higher priority
+*/
+typedef struct s_bpe_heap_item
+{
+	int			rank;		// Merge rank (lower = merge first)
+	t_bpe_token	*left;		// Left token of the pair
+	int			left_ver;	// Version when this entry was created
+	int			right_ver;	// Version of right token when created
+}	t_bpe_heap_item;
+
+#define BPE_HEAP_MAX 65536
+
+static void	bpe_heap_sift_up(t_bpe_heap_item *heap, int idx)
+{
+	t_bpe_heap_item	tmp;
+	int				parent;
+
+	while (idx > 0)
+	{
+		parent = (idx - 1) / 2;
+		if (heap[parent].rank <= heap[idx].rank)
+			break ;
+		tmp = heap[parent];
+		heap[parent] = heap[idx];
+		heap[idx] = tmp;
+		idx = parent;
+	}
+}
+
+static void	bpe_heap_sift_down(t_bpe_heap_item *heap, int size, int idx)
+{
+	t_bpe_heap_item	tmp;
+	int				smallest;
+	int				left;
+	int				right;
+
+	while (1)
+	{
+		smallest = idx;
+		left = 2 * idx + 1;
+		right = 2 * idx + 2;
+		if (left < size && heap[left].rank < heap[smallest].rank)
+			smallest = left;
+		if (right < size && heap[right].rank < heap[smallest].rank)
+			smallest = right;
+		if (smallest == idx)
+			break ;
+		tmp = heap[idx];
+		heap[idx] = heap[smallest];
+		heap[smallest] = tmp;
+		idx = smallest;
+	}
+}
+
+static void	bpe_heap_push(t_bpe_heap_item *heap, int *size, int rank,
+				t_bpe_token *left)
+{
+	if (*size >= BPE_HEAP_MAX)
+		return ;
+	heap[*size].rank = rank;
+	heap[*size].left = left;
+	heap[*size].left_ver = left->version;
+	heap[*size].right_ver = left->next ? left->next->version : -1;
+	bpe_heap_sift_up(heap, *size);
+	(*size)++;
+}
+
+static t_bpe_heap_item	bpe_heap_pop(t_bpe_heap_item *heap, int *size)
+{
+	t_bpe_heap_item	top;
+
+	top = heap[0];
+	(*size)--;
+	if (*size > 0)
+	{
+		heap[0] = heap[*size];
+		bpe_heap_sift_down(heap, *size, 0);
+	}
+	return (top);
+}
 
 static void	free_bpe_list(t_bpe_token *head)
 {
@@ -457,26 +544,48 @@ static void	free_bpe_list(t_bpe_token *head)
 	}
 }
 
+/*
+** O(N log N) BPE Encoding using Min-Heap
+** 
+** Algorithm:
+** 1. Split text into characters, build doubly-linked list
+** 2. Compute merge rank for ALL adjacent pairs, push to min-heap
+** 3. Pop best pair from heap (O(log N))
+** 4. If pair is still valid (versions match), merge it
+** 5. Push new pairs (left neighbor + merged, merged + right neighbor)
+** 6. Repeat until heap empty or no valid merges
+*/
 int	tokenizer_encode(t_tokenizer *t, const char *text, int **tokens)
 {
-	t_tokenizer_internal	*ti = (t_tokenizer_internal *)t->priv;
-	t_bpe_token				*head = NULL;
+	t_tokenizer_internal	*ti;
+	t_bpe_token				*head;
 	t_bpe_token				*curr;
-	t_bpe_token				*last = NULL;
+	t_bpe_token				*last;
+	t_bpe_heap_item			*heap;
+	int						heap_size;
 	int						i;
 	int						len;
-	
-	// 1. Initial split into characters (bytes)
-	// Note: This assumes ASCII/UTF-8 bytes as initial tokens.
-	// Real BPE usually maps bytes to unicode chars first.
-	// Map space to Ġ (U+0120 = 0xC4 0xA0 in UTF-8)
+	char					pair_buf[512];
+	int						rank;
+	t_bpe_heap_item			item;
+	t_bpe_token				*left;
+	t_bpe_token				*right;
+	char					*new_str;
+
+	ti = (t_tokenizer_internal *)t->priv;
+	head = NULL;
+	last = NULL;
+	heap = xmalloc(BPE_HEAP_MAX * sizeof(t_bpe_heap_item));
+	heap_size = 0;
+
+	// 1. Initial split into characters (same as before)
 	i = 0;
 	while (text[i])
 	{
 		curr = xcalloc(1, sizeof(t_bpe_token));
+		curr->version = 0;
 		if (text[i] == ' ')
 		{
-			// Ġ = U+0120 = 0xC4 0xA0 in UTF-8
 			curr->str = xmalloc(3);
 			strcpy(curr->str, "Ġ");
 		}
@@ -495,50 +604,80 @@ int	tokenizer_encode(t_tokenizer *t, const char *text, int **tokens)
 		i++;
 	}
 
-	// 2. BPE Merge Loop
-	while (1)
+	// 2. Build initial heap with all adjacent pairs O(N log N)
+	curr = head;
+	while (curr && curr->next)
 	{
-		int				best_rank = 1000000000;
-		t_bpe_token		*best_pair = NULL;
-		char			pair_buf[256];
-
-		curr = head;
-		while (curr && curr->next)
-		{
-			// Form pair
-			snprintf(pair_buf, sizeof(pair_buf), "%s %s", curr->str, curr->next->str);
-			
-			int rank = get_merge_rank(ti, pair_buf);
-			if (rank != -1 && rank < best_rank)
-			{
-				best_rank = rank;
-				best_pair = curr;
-			}
-			curr = curr->next;
-		}
-
-		if (!best_pair)
-			break ;
-
-		// Merge best_pair and best_pair->next
-		t_bpe_token *next = best_pair->next;
-		char *new_str = xmalloc(strlen(best_pair->str) + strlen(next->str) + 1);
-		strcpy(new_str, best_pair->str);
-		strcat(new_str, next->str);
-		
-		free(best_pair->str);
-		best_pair->str = new_str;
-		
-		best_pair->next = next->next;
-		if (next->next)
-			next->next->prev = best_pair;
-		
-		free(next->str);
-		free(next);
+		snprintf(pair_buf, sizeof(pair_buf), "%s %s", curr->str, curr->next->str);
+		rank = get_merge_rank(ti, pair_buf);
+		if (rank >= 0)
+			bpe_heap_push(heap, &heap_size, rank, curr);
+		curr = curr->next;
 	}
 
-	// 3. Convert to IDs
-	// Count tokens
+	// 3. Process heap until empty
+	while (heap_size > 0)
+	{
+		item = bpe_heap_pop(heap, &heap_size);
+		left = item.left;
+		
+		// Validate: check if left token is still valid (not deleted)
+		if (!left->str)
+			continue ;  // Token was deleted in a previous merge
+		
+		// Validate: check if this pair still exists (versions match)
+		if (!left->next)
+			continue ;
+		if (!left->next->str)
+			continue ;  // Right token was deleted
+		if (left->version != item.left_ver)
+			continue ;
+		if (left->next->version != item.right_ver)
+			continue ;
+		
+		right = left->next;
+		
+		// Merge: left absorbs right
+		new_str = xmalloc(strlen(left->str) + strlen(right->str) + 1);
+		strcpy(new_str, left->str);
+		strcat(new_str, right->str);
+		free(left->str);
+		left->str = new_str;
+		left->version++;  // Invalidate old heap entries for this token
+		
+		// Mark right as deleted (lazy deletion - keeps pointers valid)
+		free(right->str);
+		right->str = NULL;  // Mark as deleted
+		
+		// Unlink right from list
+		left->next = right->next;
+		if (right->next)
+			right->next->prev = left;
+		
+		// Push new pairs involving merged token
+		// Left neighbor + merged token
+		if (left->prev)
+		{
+			snprintf(pair_buf, sizeof(pair_buf), "%s %s", 
+				left->prev->str, left->str);
+			rank = get_merge_rank(ti, pair_buf);
+			if (rank >= 0)
+				bpe_heap_push(heap, &heap_size, rank, left->prev);
+		}
+		// Merged token + right neighbor
+		if (left->next)
+		{
+			snprintf(pair_buf, sizeof(pair_buf), "%s %s", 
+				left->str, left->next->str);
+			rank = get_merge_rank(ti, pair_buf);
+			if (rank >= 0)
+				bpe_heap_push(heap, &heap_size, rank, left);
+		}
+	}
+
+	free(heap);
+
+	// 4. Convert to IDs
 	len = 0;
 	curr = head;
 	while (curr)
@@ -548,22 +687,16 @@ int	tokenizer_encode(t_tokenizer *t, const char *text, int **tokens)
 	}
 
 	*tokens = xmalloc(len * sizeof(int));
-	int out_idx = 0;
-	
+	i = 0;
 	curr = head;
 	while (curr)
 	{
-		// Need to find ID for curr->str
-		// Note: The vocab might have "Ġ" for spaces.
-		// Our simple split didn't handle that.
-		// We'll just lookup raw string.
-		int tid = get_token_id(t, curr->str);
-		(*tokens)[out_idx++] = tid;
+		(*tokens)[i++] = get_token_id(t, curr->str);
 		curr = curr->next;
 	}
 	
 	free_bpe_list(head);
-	return (out_idx);
+	return (len);
 }
 
 // Thread-local buffer for decoded tokens (handles Ġ → space conversion)

@@ -27,7 +27,7 @@ void	kv_cache_init(t_kv_cache *c, t_arena *a, t_kv_init_params *p)
 	shape[0] = p->max_seq;
 	shape[1] = p->num_heads;
 	shape[2] = p->head_dim;
-	size_bytes = p->max_seq * p->num_heads * p->head_dim * sizeof(t_bf16);
+	size_bytes = (size_t)p->max_seq * p->num_heads * p->head_dim * sizeof(t_bf16);
 	c->k = tensor_view(arena_alloc(a, size_bytes), shape, 3);
 	c->v = tensor_view(arena_alloc(a, size_bytes), shape, 3);
 }

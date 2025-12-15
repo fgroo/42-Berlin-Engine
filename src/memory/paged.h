@@ -97,8 +97,9 @@ typedef struct s_paged_kv_cache
 ** @param n_kv_heads: KV heads per layer
 ** @param head_dim: Dimension per head
 ** @param max_blocks_per_layer: Max blocks per layer (determines context length)
+** @return: 0 on success, -1 on allocation failure
 */
-void	block_manager_init(t_block_manager *bm, int n_layers, int n_kv_heads,
+int	block_manager_init(t_block_manager *bm, int n_layers, int n_kv_heads,
 			int head_dim, int max_blocks_per_layer);
 
 /*

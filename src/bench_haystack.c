@@ -91,7 +91,7 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	t.nested_learning = 0;  /* Disable learning for this test */
-	t.use_paged_kv = 0;     /* FORCE DENSE PATH for A/B test */
+	t.use_paged_kv = 1;     /* PAGED MODE ON - Test sparse attention */
 	
 	/* Init tokenizer */
 	strncpy(tokenizer_path, argv[1], sizeof(tokenizer_path) - 1);

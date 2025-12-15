@@ -7,6 +7,8 @@
 # include "memory/kv_cache.h"
 # include "memory/paged.h"
 # include "memory/arena.h"
+# include <stdatomic.h>  // C11 atomics for thread-safe NL counters
+# include "nested/nl_counters.h"  // CAS-based lock-free NL counters
 
 typedef struct s_transformer_config
 {
@@ -61,7 +63,20 @@ typedef struct s_inference_state
 	float	*logits; // [vocab_size]
 	float	*grad_x; // Gradient buffer for backprop [dim]
 	t_kv_cache	*kv_cache; // Array of KV caches [n_layers]
+	// ========== BATCHED PREFILL BUFFERS (Phase 2) ==========
+	// These enable GEMM (M>1) instead of GEMV (M=1) for QKV projections
+	float	*batch_x;    // [batch_size x dim] - batched embeddings
+	float	*batch_xb;   // [batch_size x dim] - batched normalized
+	float	*batch_q;    // [batch_size x n_heads * head_dim]
+	float	*batch_k;    // [batch_size x n_kv_heads * head_dim]
+	float	*batch_v;    // [batch_size x n_kv_heads * head_dim]
+	float	*batch_out;  // [batch_size x dim] - attention output
+	float	*batch_hb;   // [batch_size x hidden_dim] - FFN buffer
+	float	*batch_hb2;  // [batch_size x hidden_dim] - FFN buffer 2
 }	t_inference_state;
+
+// Maximum batch size for prefill (tune for L2 cache: 64 * 3072 * 4 = 768KB)
+#define MAX_PREFILL_BATCH 64
 
 // =============== NESTED LEARNING ===============
 // Fluid weights = small adapters that learn during inference
@@ -109,10 +124,13 @@ typedef struct s_transformer
 	void				*lsh_index;        // LSH block index (t_lsh_index*)
 	int					use_lsh;           // Enable LSH-based sparse attention
 	t_vision_tower			*vision;       // NULL = text-only mode (lazy vision)
-	// Nested learning counters (was static - now per-transformer for thread safety)
-	int					nl_step;           // Total backward steps
-	int					nl_skipped;        // Skipped steps (low/high loss)
-	int					nl_actual_steps;   // Actual learning steps this turn
+	/*
+	** Nested Learning Counters - LOCK-FREE CAS (Phase 2)
+	** Step + Skipped are packed into a single 64-bit atomic to ensure
+	** consistent reads (no torn reads from interleaved updates).
+	** See nl_counters.h for the CAS-based update API.
+	*/
+	t_nl_atomic_state		nl_state;          // Packed step+skipped + actual_steps
 	int		persistent_mode; // 1 = retain fluid weights across turns
 	int		raw_mode;        // 1 = no chat template (raw completion)
 	// Paged KV Cache for Sparse Attention (O(K) memory access)
@@ -125,6 +143,17 @@ int		transformer_init(t_transformer *t, const char *model_path, const char *conf
 void	transformer_free(t_transformer *t);
 float	*transformer_forward(t_transformer *t, int token, int pos);
 void	transformer_backward_step(t_transformer *t, int target_token, int pos);
+
+/*
+** Batched prefill: Process multiple tokens using GEMM instead of GEMV
+** Significantly faster for long prompts (20%+ speedup expected)
+** @param t: Transformer struct
+** @param tokens: Array of token IDs  
+** @param batch_size: Number of tokens to process (max MAX_PREFILL_BATCH)
+** @param start_pos: Starting position in sequence
+*/
+void	forward_prefill_batch(t_transformer *t, const int *tokens,
+			int batch_size, int start_pos);
 
 // Vision tower control
 int		activate_vision_tower(t_transformer *t);

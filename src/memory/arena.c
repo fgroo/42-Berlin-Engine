@@ -15,14 +15,33 @@
 #include <stdio.h>
 #include <string.h>
 
+/*
+** SIMD ALIGNMENT FIX (Issue #4)
+** 
+** malloc() only guarantees 8 or 16-byte alignment on most systems.
+** AVX2 instructions like _mm256_load_ps REQUIRE 32-byte alignment,
+** and cache-line alignment (64 bytes) is optimal for performance.
+**
+** We use posix_memalign() to guarantee 64-byte alignment of the arena base.
+** This ensures all subsequent arena allocations (which also align to 64)
+** will be properly aligned for SIMD operations.
+*/
+
+#define ARENA_ALIGNMENT 64  /* Cache line size for modern x86 CPUs */
+
 void	arena_init(t_arena *a, size_t size)
 {
-	a->base = malloc(size);
-	if (!a->base)
+	void	*ptr;
+	int		ret;
+
+	ptr = NULL;
+	ret = posix_memalign(&ptr, ARENA_ALIGNMENT, size);
+	if (ret != 0 || !ptr)
 	{
-		fprintf(stderr, "Fatal: arena alloc failed\n");
+		fprintf(stderr, "Fatal: arena posix_memalign failed (ret=%d)\n", ret);
 		exit(1);
 	}
+	a->base = (char *)ptr;
 	a->size = size;
 	a->offset = 0;
 }

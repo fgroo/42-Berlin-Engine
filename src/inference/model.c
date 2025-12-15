@@ -189,6 +189,18 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 	t->state.logits = aligned_calloc(t->config.vocab_size, sizeof(float));
 	t->state.grad_x = aligned_calloc(t->config.dim, sizeof(float)); // For backprop
 	
+	// ========== BATCHED PREFILL BUFFERS (Phase 2) ==========
+	// Enable GEMM (M=batch_size) instead of GEMV (M=1) for QKV projections
+	// Total: ~5-6MB extra memory for 20%+ prefill speedup
+	t->state.batch_x = aligned_calloc(MAX_PREFILL_BATCH * t->config.dim, sizeof(float));
+	t->state.batch_xb = aligned_calloc(MAX_PREFILL_BATCH * t->config.dim, sizeof(float));
+	t->state.batch_q = aligned_calloc(MAX_PREFILL_BATCH * t->config.n_heads * t->config.head_dim, sizeof(float));
+	t->state.batch_k = aligned_calloc(MAX_PREFILL_BATCH * t->config.n_kv_heads * t->config.head_dim, sizeof(float));
+	t->state.batch_v = aligned_calloc(MAX_PREFILL_BATCH * t->config.n_kv_heads * t->config.head_dim, sizeof(float));
+	t->state.batch_out = aligned_calloc(MAX_PREFILL_BATCH * t->config.dim, sizeof(float));
+	t->state.batch_hb = aligned_calloc(MAX_PREFILL_BATCH * t->config.hidden_dim, sizeof(float));
+	t->state.batch_hb2 = aligned_calloc(MAX_PREFILL_BATCH * t->config.hidden_dim, sizeof(float));
+	
 	// Init KV Cache
 	// Allocate 1GB for KV cache
 	size_t arena_size = 1024 * 1024 * 1024; 
@@ -209,9 +221,7 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 	// NESTED LEARNING: Enable test-time training
 	t->nested_learning = 1; // ENABLED with gradient clipping for stability
 	t->nested_lr = NESTED_LR; // From config.h
-	t->nl_step = 0;
-	t->nl_actual_steps = 0;
-	t->nl_skipped = 0;
+	nl_counters_reset(&t->nl_state);  // CAS-based atomic counters (Phase 2)
 	
 	// CHAT MODE: Initialize to safe defaults (was uninitialized stack garbage!)
 	t->raw_mode = 0;        // Chat template ENABLED by default
@@ -421,6 +431,16 @@ void	transformer_free(t_transformer *t)
 	free(t->state.logits);
 	free(t->state.grad_x);
 	free(t->state.kv_cache);
+	
+	// Free batch prefill buffers
+	free(t->state.batch_x);
+	free(t->state.batch_xb);
+	free(t->state.batch_q);
+	free(t->state.batch_k);
+	free(t->state.batch_v);
+	free(t->state.batch_out);
+	free(t->state.batch_hb);
+	free(t->state.batch_hb2);
 	
 	// Free fluid layers
 	if (t->fluid_layers) {

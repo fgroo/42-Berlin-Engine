@@ -294,9 +294,7 @@ static int	run_generation(t_transformer *t, t_tokenizer *tok,
 
 	// CRITICAL: Reset ALL per-turn learning counters!
 	// Without this, counters keep incrementing across turns
-	t->nl_step = 0;           // Display counter
-	t->nl_skipped = 0;        // Skipped counter
-	t->nl_actual_steps = 0;   // Per-turn budget counter
+	nl_counters_reset(&t->nl_state);  // CAS-based atomic reset (Phase 2)
 
 	// NESTED LEARNING: Zero FP32 accumulators at start of turn
 	backward_zero_grads(t);
@@ -330,9 +328,19 @@ static int	run_generation(t_transformer *t, t_tokenizer *tok,
 	}
 	else
 	{
-		// Sequential prefill (no learning path)
-		for (i = 0; i < n_tokens - 1; i++)
-			transformer_forward(t, tokens[i], ctx->session_pos + i);
+		// Batched prefill (GEMM path) - Phase 2.2a
+		// Process tokens in chunks of MAX_PREFILL_BATCH for GEMM efficiency
+		int chunk_start = 0;
+		int n_prefill = n_tokens - 1;
+		while (chunk_start < n_prefill)
+		{
+			int chunk_size = n_prefill - chunk_start;
+			if (chunk_size > MAX_PREFILL_BATCH)
+				chunk_size = MAX_PREFILL_BATCH;
+			forward_prefill_batch(t, tokens + chunk_start, chunk_size,
+				ctx->session_pos + chunk_start);
+			chunk_start += chunk_size;
+		}
 	}
 
 	next_token = tokens[n_tokens - 1];

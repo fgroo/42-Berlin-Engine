@@ -101,7 +101,13 @@ static char	*json_string_decode(const char *s, int len)
 	int		i;
 	int		j;
 
-	res = xmalloc(len + 1);
+	/*
+	** FIX Issue #3: Buffer Overflow Prevention
+	** UTF-16 surrogate pairs can expand to 4-byte UTF-8 sequences.
+	** Worst case: each input char becomes 4 output bytes.
+	** Example: \uD83D\uDE00 (12 chars) -> 😀 (4 bytes)
+	*/
+	res = xmalloc(len * 4 + 1);
 	i = 0;
 	j = 0;
 	while (i < len)
@@ -561,6 +567,7 @@ int	tokenizer_encode(t_tokenizer *t, const char *text, int **tokens)
 	t_bpe_token				*head;
 	t_bpe_token				*curr;
 	t_bpe_token				*last;
+	t_bpe_token				*deleted_head;  /* Trash list for deferred cleanup */
 	t_bpe_heap_item			*heap;
 	int						heap_size;
 	int						i;
@@ -575,6 +582,7 @@ int	tokenizer_encode(t_tokenizer *t, const char *text, int **tokens)
 	ti = (t_tokenizer_internal *)t->priv;
 	head = NULL;
 	last = NULL;
+	deleted_head = NULL;
 	heap = xmalloc(BPE_HEAP_MAX * sizeof(t_bpe_heap_item));
 	heap_size = 0;
 
@@ -654,6 +662,18 @@ int	tokenizer_encode(t_tokenizer *t, const char *text, int **tokens)
 		if (right->next)
 			right->next->prev = left;
 		
+		/*
+		** FIX Issue #1: BPE Memory Leak - Deferred Cleanup
+		** We can't free(right) immediately because old heap entries may still
+		** reference this pointer via item.left. The validation at line 625
+		** checks if (!left->str) which would be a dangling pointer access.
+		**
+		** Solution: Link deleted nodes into a "trash" list for cleanup.
+		** We reuse right->next to chain them (right->prev is now stale).
+		*/
+		right->next = deleted_head;
+		deleted_head = right;
+		
 		// Push new pairs involving merged token
 		// Left neighbor + merged token
 		if (left->prev)
@@ -676,6 +696,14 @@ int	tokenizer_encode(t_tokenizer *t, const char *text, int **tokens)
 	}
 
 	free(heap);
+	
+	/* FIX Issue #1: Free all deleted nodes now that heap is done */
+	while (deleted_head)
+	{
+		t_bpe_token	*tmp = deleted_head;
+		deleted_head = deleted_head->next;
+		free(tmp);  /* str already freed above */
+	}
 
 	// 4. Convert to IDs
 	len = 0;

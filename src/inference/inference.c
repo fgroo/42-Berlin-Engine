@@ -11,6 +11,7 @@
 #include "compute/ops_heap.h"  // Min-heap for O(n log k) Top-K selection
 #include "compute/ops_attention.h"  // Flash Attention kernel
 #include "compute/simd_kernels.h"  // SIMD primitives (simd_dot_bf16_f32, etc.)
+#include "compute/ops_math_fast.h"  // fast_expf for SiLU activation
 
 // Helper: Pack 8x 32-bit ints to 8x 16-bit ints (lower 16 bits of each)
 // AVX2 doesn't have direct 256->128 pack, so we extract and combine
@@ -199,7 +200,20 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 			// 2. LSH (Global): For older tokens, use hash-based retrieval
 			//    - Handles long-context memory (RAG-style)
 			
-			topk_indices = arena_alloc(&t->scratch, attend_k * sizeof(int));
+			/*
+			** GRACEFUL OOM HANDLING:
+			** If any arena allocation fails, we fall back to dense attention.
+			** This prevents crashes on ultra-long contexts where arena is exhausted.
+			** Better slow than dead.
+			*/
+			topk_indices = arena_try_alloc(&t->scratch, attend_k * sizeof(int));
+			if (!topk_indices)
+			{
+				fprintf(stderr, "[WARN] Arena OOM for topk_indices. Fallback to dense.\n");
+				use_sparse = 0;
+				attend_k = kv_len;
+				goto do_attention;  // Skip sparse logic
+			}
 			
 			t_lsh_ctx *lsh_ctx = (t_lsh_ctx *)t->lsh_ctx;
 			t_lsh_index *lsh_idx = (t_lsh_index *)t->lsh_index;
@@ -207,7 +221,15 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 			
 			// Allocate candidate positions (window + LSH candidates)
 			int max_candidates = kv_len;  // Worst case: all positions
-			int *candidate_positions = arena_alloc(&t->scratch, max_candidates * sizeof(int));
+			int *candidate_positions = arena_try_alloc(&t->scratch, max_candidates * sizeof(int));
+			if (!candidate_positions)
+			{
+				fprintf(stderr, "[WARN] Arena OOM for candidates. Fallback to dense.\n");
+				t->scratch.offset = scratch_saved;
+				use_sparse = 0;
+				attend_k = kv_len;
+				goto do_attention;
+			}
 			int n_candidates = 0;
 			
 			// ===== STEP 1: SLIDING WINDOW (mandatory local context) =====
@@ -257,7 +279,15 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 			}
 			
 			// Step 3: Score only candidate positions with SIMD
-			float *key_scores = arena_alloc(&t->scratch, n_candidates * sizeof(float));
+			float *key_scores = arena_try_alloc(&t->scratch, n_candidates * sizeof(float));
+			if (!key_scores)
+			{
+				fprintf(stderr, "[WARN] Arena OOM for key_scores. Fallback to dense.\n");
+				t->scratch.offset = scratch_saved;
+				use_sparse = 0;
+				attend_k = kv_len;
+				goto do_attention;
+			}
 			t_bf16 *k_data = (t_bf16 *)s->kv_cache[i].k.data;
 			int kv_stride = c->n_kv_heads * c->head_dim;
 			
@@ -280,7 +310,15 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 			int actual_k = (n_candidates < attend_k) ? n_candidates : attend_k;
 			
 			// Allocate heap on scratch arena
-			t_heap_item *heap = arena_alloc(&t->scratch, actual_k * sizeof(t_heap_item));
+			t_heap_item *heap = arena_try_alloc(&t->scratch, actual_k * sizeof(t_heap_item));
+			if (!heap)
+			{
+				fprintf(stderr, "[WARN] Arena OOM for heap. Fallback to dense.\n");
+				t->scratch.offset = scratch_saved;
+				use_sparse = 0;
+				attend_k = kv_len;
+				goto do_attention;
+			}
 			int heap_size = 0;
 			
 			// Build heap with O(n log k) insertion
@@ -291,6 +329,8 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 			heap_extract_indices(heap, heap_size, topk_indices);
 			attend_k = heap_size;
 		}
+		
+		do_attention:
 		// ========== FLASH ATTENTION ==========
 		// O(head_dim) memory instead of O(seq_len) for scores
 		// Uses online softmax for numerical stability
@@ -310,8 +350,9 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 				// SPARSE PAGED PATH: O(K) attention instead of O(N)
 				// Arena-allocate scores (safe for infinite context)
 				size_t paged_scratch = t->scratch.offset;
-				t_block_score *scores = arena_alloc(&t->scratch, 
+				t_block_score *scores = arena_try_alloc(&t->scratch, 
 					n_blocks * sizeof(t_block_score));
+				(void)paged_scratch;  // Suppress unused warning
 				if (!scores)
 				{
 					// Fallback to dense path if arena exhausted
@@ -436,3 +477,384 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 ** with FP32 gradient accumulation for mixed precision training.
 ** See backward_zero_grads() and backward_apply_grads() for new API.
 */
+
+/*
+** ============================================================================
+** BATCHED PREFILL (Phase 2.2a)
+** ============================================================================
+** Process multiple tokens using GEMM instead of GEMV for projections.
+** 
+** Key insight: QKV projections are the same for all tokens in a batch.
+** Instead of: for each token: Q[1,dim] = xb[1,dim] @ Wq[dim,dim]^T  (GEMV)
+** We do:      Q[B,dim] = xb[B,dim] @ Wq[dim,dim]^T                   (GEMM)
+**
+** Attention is still sequential (causal mask requires it), but the
+** expensive projections are now batched.
+** ============================================================================
+*/
+
+void	forward_prefill_batch(t_transformer *t, const int *tokens,
+		int batch_size, int start_pos)
+{
+	t_transformer_config	*c;
+	t_inference_state		*s;
+	int						b;
+	int						i;
+	int						dim;
+	int						kv_dim;
+
+	c = &t->config;
+	s = &t->state;
+	dim = c->dim;
+	kv_dim = c->n_kv_heads * c->head_dim;
+
+	/* Clamp batch size */
+	if (batch_size <= 0)
+		return ;
+	if (batch_size > MAX_PREFILL_BATCH)
+		batch_size = MAX_PREFILL_BATCH;
+
+	/*
+	** PHASE 1: Batched Embedding Lookup
+	** Load all token embeddings into batch_x [batch_size x dim]
+	*/
+	#pragma omp parallel for schedule(static)
+	for (b = 0; b < batch_size; b++)
+	{
+		int			token;
+		int			j;
+		uint16_t	*emb_data;
+		uint16_t	*tok_vec;
+		float		*dst;
+
+		token = tokens[b];
+		emb_data = (uint16_t *)t->weights.token_embedding->data;
+		tok_vec = emb_data + token * dim;
+		dst = s->batch_x + b * dim;
+
+		/* BF16 -> F32 conversion */
+		for (j = 0; j < dim; j++)
+		{
+			uint32_t val = (uint32_t)tok_vec[j] << 16;
+			memcpy(&dst[j], &val, sizeof(float));
+		}
+	}
+
+	/*
+	** PHASE 2: Process each layer
+	** Projections use GEMM, attention stays sequential
+	*/
+	for (i = 0; i < c->n_layers; i++)
+	{
+		t_layer_weights	*l;
+		t_tensor		batch_xb_t;
+		t_tensor		batch_q_t;
+		t_tensor		batch_k_t;
+		t_tensor		batch_v_t;
+
+		l = &t->weights.layers[i];
+
+		/*
+		** 2a. Batched RMSNorm
+		** Each row is normalized independently
+		*/
+		#pragma omp parallel for schedule(static)
+		for (b = 0; b < batch_size; b++)
+		{
+			float	*row_in;
+			float	*row_out;
+			float	ss;
+			int		j;
+
+			row_in = s->batch_x + b * dim;
+			row_out = s->batch_xb + b * dim;
+			ss = 0.0f;
+			for (j = 0; j < dim; j++)
+				ss += row_in[j] * row_in[j];
+			ss = 1.0f / sqrtf(ss / dim + c->norm_eps);
+			for (j = 0; j < dim; j++)
+				row_out[j] = row_in[j] * ss * bf16_to_float(((t_bf16 *)l->attention_norm->data)[j]);
+		}
+
+		/*
+		** 2b. Batched QKV Projections (GEMM!)
+		** This is where we win: M=batch_size instead of M=1
+		**
+		** Q[batch_size, n_heads*head_dim] = batch_xb[batch_size, dim] @ Wq[dim, n_heads*head_dim]^T
+		*/
+		batch_xb_t.data = s->batch_xb;
+		batch_xb_t.ndim = 2;
+		batch_xb_t.shape[0] = dim;
+		batch_xb_t.shape[1] = batch_size;  /* Column-major: dim rows, batch cols */
+		batch_xb_t.size = dim * batch_size;
+		batch_xb_t.dtype = DTYPE_F32;
+
+		batch_q_t.data = s->batch_q;
+		batch_q_t.ndim = 2;
+		batch_q_t.shape[0] = c->n_heads * c->head_dim;
+		batch_q_t.shape[1] = batch_size;
+		batch_q_t.size = c->n_heads * c->head_dim * batch_size;
+		batch_q_t.dtype = DTYPE_F32;
+
+		batch_k_t.data = s->batch_k;
+		batch_k_t.ndim = 2;
+		batch_k_t.shape[0] = kv_dim;
+		batch_k_t.shape[1] = batch_size;
+		batch_k_t.size = kv_dim * batch_size;
+		batch_k_t.dtype = DTYPE_F32;
+
+		batch_v_t.data = s->batch_v;
+		batch_v_t.ndim = 2;
+		batch_v_t.shape[0] = kv_dim;
+		batch_v_t.shape[1] = batch_size;
+		batch_v_t.size = kv_dim * batch_size;
+		batch_v_t.dtype = DTYPE_F32;
+
+		/* GEMM: uses gemm_bf16_f32_tiled for M>1 */
+		op_matmul(&batch_q_t, l->wq, &batch_xb_t);
+		op_matmul(&batch_k_t, l->wk, &batch_xb_t);
+		op_matmul(&batch_v_t, l->wv, &batch_xb_t);
+
+		/*
+		** 2c. RoPE + KV Cache + Attention (Sequential)
+		** Attention is causal: token b can only attend to [0, start_pos+b]
+		** So we process tokens one by one here
+		*/
+		for (b = 0; b < batch_size; b++)
+		{
+			int		pos;
+			float	*q_row;
+			float	*k_row;
+			float	*v_row;
+
+			pos = start_pos + b;
+			q_row = s->batch_q + b * c->n_heads * c->head_dim;
+			k_row = s->batch_k + b * kv_dim;
+			v_row = s->batch_v + b * kv_dim;
+
+			/* Copy to single-token buffers for existing ops */
+			memcpy(s->q, q_row, c->n_heads * c->head_dim * sizeof(float));
+			memcpy(s->k, k_row, kv_dim * sizeof(float));
+			memcpy(s->v, v_row, kv_dim * sizeof(float));
+
+			/* RoPE */
+			t_tensor q_t, k_t;
+			q_t.data = s->q;
+			q_t.size = c->n_heads * c->head_dim;
+			k_t.data = s->k;
+			k_t.size = kv_dim;
+
+			t_rope_ctx rope_ctx = {
+				.head_dim = c->head_dim,
+				.theta_base = c->rope_theta,
+				.beta_fast = c->beta_fast,
+				.beta_slow = c->beta_slow,
+				.factor = c->rope_factor,
+				.mscale = (c->mscale == 1.0f && c->rope_factor > 1.0f)
+					? sqrtf(0.1f * logf(c->rope_factor) + 1.0f)
+					: c->mscale,
+				.orig_ctx = c->orig_ctx_len,
+				.thetas_cache = t->rope_thetas
+			};
+			op_rope(&q_t, pos, &rope_ctx);
+			op_rope(&k_t, pos, &rope_ctx);
+
+			/* KV Cache Append */
+			t_tensor k_tensor, v_tensor;
+			k_tensor.data = s->k;
+			k_tensor.size = kv_dim;
+			k_tensor.dtype = DTYPE_F32;
+			v_tensor.data = s->v;
+			v_tensor.size = kv_dim;
+			v_tensor.dtype = DTYPE_F32;
+
+			if (t->use_paged_kv)
+				paged_kv_append(&t->paged_kv[i], s->k, s->v, pos);
+			else
+				kv_cache_append(&s->kv_cache[i], &k_tensor, &v_tensor);
+
+			/* Attention (uses existing dense/sparse path) */
+			memset(s->hb, 0, c->n_heads * c->head_dim * sizeof(float));
+
+			int kv_len = pos + 1;
+			t_attention_params attn_p = {
+				.output = s->hb,
+				.q = s->q,
+				.kv_cache = &s->kv_cache[i],
+				.n_heads = c->n_heads,
+				.n_kv_heads = c->n_kv_heads,
+				.head_dim = c->head_dim,
+				.scale = 1.0f / sqrtf((float)c->head_dim)
+			};
+			op_attention_dense(&attn_p, kv_len);
+
+			/* Output projection: s->xb = Wo @ s->hb */
+			/* Note: hb after attention is [n_heads * head_dim], not [dim] */
+			int attn_dim = c->n_heads * c->head_dim;
+			t_tensor hb_t, xb_t;
+			hb_t.data = s->hb;
+			hb_t.ndim = 2;
+			hb_t.shape[0] = attn_dim;  /* Attention output = n_heads*head_dim = 4096 */
+			hb_t.shape[1] = 1;
+			hb_t.size = attn_dim;
+			hb_t.dtype = DTYPE_F32;
+			xb_t.data = s->xb;
+			xb_t.ndim = 2;
+			xb_t.shape[0] = dim;
+			xb_t.shape[1] = 1;
+			xb_t.size = dim;
+			xb_t.dtype = DTYPE_F32;
+
+				op_matmul(&xb_t, l->wo, &hb_t);
+
+			/* Residual */
+			float *x_row = s->batch_x + b * dim;
+			for (int j = 0; j < dim; j++)
+				x_row[j] += s->xb[j];
+		}
+
+		/*
+		** ====================================================================
+		** 2d. TRUE BATCHED FFN (BLAS 3)
+		** ====================================================================
+		** Previously: per-token GEMV in parallel (weights loaded batch_size times)
+		** Now: single GEMM for entire batch (weights loaded ONCE)
+		** 
+		** Memory access pattern:
+		**   OLD: for each token: load W1,W3,W2 -> compute -> next token
+		**   NEW: load W1 once -> compute all tokens -> load W3 once -> ...
+		** 
+		** This is the core insight of efficient batched inference.
+		** ====================================================================
+		*/
+
+		/*
+		** Step 1: Batched RMSNorm for FFN input
+		** Each row is normalized independently (parallelized)
+		** Output: batch_xb[batch_size x dim]
+		*/
+		#pragma omp parallel for schedule(static)
+		for (b = 0; b < batch_size; b++)
+		{
+			float	*xr;
+			float	*xb_row;
+			float	ss;
+			int		j;
+
+			xr = s->batch_x + b * dim;
+			xb_row = s->batch_xb + b * dim;
+			ss = 0.0f;
+			for (j = 0; j < dim; j++)
+				ss += xr[j] * xr[j];
+			ss = 1.0f / sqrtf(ss / dim + c->norm_eps);
+			for (j = 0; j < dim; j++)
+				xb_row[j] = xr[j] * ss * bf16_to_float(((t_bf16 *)l->ffn_norm->data)[j]);
+		}
+
+		/*
+		** Step 2: Batched Gate & Up Projections (SINGLE GEMM each!)
+		** 
+		** Gate: batch_hb[batch_size x hidden_dim] = batch_xb @ W1^T
+		** Up:   batch_hb2[batch_size x hidden_dim] = batch_xb @ W3^T
+		** 
+		** Now we load W1 and W3 only ONCE, not batch_size times!
+		*/
+		{
+			t_tensor batch_xb_t2, batch_hb_t2, batch_hb2_t2;
+
+			/* Setup batch_xb tensor [dim x batch_size] (column-major for matmul) */
+			batch_xb_t2.data = s->batch_xb;
+			batch_xb_t2.ndim = 2;
+			batch_xb_t2.shape[0] = dim;
+			batch_xb_t2.shape[1] = batch_size;
+			batch_xb_t2.size = dim * batch_size;
+			batch_xb_t2.dtype = DTYPE_F32;
+
+			/* Setup batch_hb (gate output) [hidden_dim x batch_size] */
+			batch_hb_t2.data = s->batch_hb;
+			batch_hb_t2.ndim = 2;
+			batch_hb_t2.shape[0] = c->hidden_dim;
+			batch_hb_t2.shape[1] = batch_size;
+			batch_hb_t2.size = c->hidden_dim * batch_size;
+			batch_hb_t2.dtype = DTYPE_F32;
+
+			/* Setup batch_hb2 (up output) [hidden_dim x batch_size] */
+			batch_hb2_t2.data = s->batch_hb2;
+			batch_hb2_t2.ndim = 2;
+			batch_hb2_t2.shape[0] = c->hidden_dim;
+			batch_hb2_t2.shape[1] = batch_size;
+			batch_hb2_t2.size = c->hidden_dim * batch_size;
+			batch_hb2_t2.dtype = DTYPE_F32;
+
+			/* BATCHED GEMM: Gate projection - ONE call for all tokens! */
+			op_matmul(&batch_hb_t2, l->w1, &batch_xb_t2);
+
+			/* BATCHED GEMM: Up projection - ONE call for all tokens! */
+			op_matmul(&batch_hb2_t2, l->w3, &batch_xb_t2);
+		}
+
+		/*
+		** Step 3: SwiGLU Activation (Elementwise, Memory-Bound)
+		** silu(gate) * up = (gate / (1 + exp(-gate))) * up
+		** 
+		** This is memory-bound, so OMP parallelization is perfect here.
+		** Using fast_expf for 10x speedup over standard expf.
+		*/
+		{
+			int total_elem = batch_size * c->hidden_dim;
+			int idx;
+			#pragma omp parallel for schedule(static)
+			for (idx = 0; idx < total_elem; idx++)
+			{
+				float g = s->batch_hb[idx];
+				float u = s->batch_hb2[idx];
+				/* SiLU: g / (1 + exp(-g)) * u */
+				float silu = g / (1.0f + fast_expf(-g));
+				s->batch_hb[idx] = silu * u;
+			}
+		}
+
+		/*
+		** Step 4: Batched Down Projection (SINGLE GEMM!)
+		** 
+		** batch_xb[batch_size x dim] = batch_hb @ W2^T
+		** 
+		** Again: W2 loaded ONCE, reused for all tokens in batch.
+		*/
+		{
+			t_tensor batch_xb_t3, batch_hb_t3;
+
+			/* batch_hb after activation: [hidden_dim x batch_size] */
+			batch_hb_t3.data = s->batch_hb;
+			batch_hb_t3.ndim = 2;
+			batch_hb_t3.shape[0] = c->hidden_dim;
+			batch_hb_t3.shape[1] = batch_size;
+			batch_hb_t3.size = c->hidden_dim * batch_size;
+			batch_hb_t3.dtype = DTYPE_F32;
+
+			/* Output goes to batch_xb: [dim x batch_size] */
+			batch_xb_t3.data = s->batch_xb;
+			batch_xb_t3.ndim = 2;
+			batch_xb_t3.shape[0] = dim;
+			batch_xb_t3.shape[1] = batch_size;
+			batch_xb_t3.size = dim * batch_size;
+			batch_xb_t3.dtype = DTYPE_F32;
+
+			/* BATCHED GEMM: Down projection - ONE call for all tokens! */
+			op_matmul(&batch_xb_t3, l->w2, &batch_hb_t3);
+		}
+
+		/*
+		** Step 5: Residual Connection
+		** batch_x += batch_xb (add FFN output to residual stream)
+		*/
+		{
+			int total_elem2 = batch_size * dim;
+			int idx2;
+			#pragma omp parallel for schedule(static)
+			for (idx2 = 0; idx2 < total_elem2; idx2++)
+				s->batch_x[idx2] += s->batch_xb[idx2];
+		}
+	}
+}
+

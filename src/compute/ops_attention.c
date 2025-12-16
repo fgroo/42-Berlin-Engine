@@ -68,9 +68,9 @@ void	flash_attention_head(float *out, const float *q,
 		scale_factor = fast_expf(prev_max - max_score);
 		raw_exp = fast_expf(score - max_score);
 		sum_exp = sum_exp * scale_factor + raw_exp;
-		/* 3. Rescale and accumulate output */
-		simd_scale_f32(out, scale_factor, head_dim);
-		simd_fma_bf16_to_f32(out, v_cache + t * head_dim, raw_exp, head_dim);
+		/* 3. Fused rescale and accumulate output (half the memory ops) */
+		simd_rescale_fma_bf16(out, scale_factor, v_cache + t * head_dim,
+			raw_exp, head_dim);
 		t++;
 	}
 	/* 4. Final normalization */
@@ -110,9 +110,9 @@ static void	attention_head_dense(float *out, const float *q,
 		scale_factor = fast_expf(prev_max - max_score);
 		raw_exp = fast_expf(score - max_score);
 		sum_exp = sum_exp * scale_factor + raw_exp;
-		simd_scale_f32(out, scale_factor, head_dim);
-		simd_fma_bf16_to_f32(out, v_data + t * kv_stride + kv_h * head_dim,
-			raw_exp, head_dim);
+		/* Fused rescale + FMA (2x less memory traffic) */
+		simd_rescale_fma_bf16(out, scale_factor,
+			v_data + t * kv_stride + kv_h * head_dim, raw_exp, head_dim);
 		t++;
 	}
 	if (sum_exp > 0.0f)
@@ -154,9 +154,9 @@ static void	attention_head_sparse(float *out, const float *q,
 		scale_factor = fast_expf(prev_max - max_score);
 		raw_exp = fast_expf(score - max_score);
 		sum_exp = sum_exp * scale_factor + raw_exp;
-		simd_scale_f32(out, scale_factor, head_dim);
-		simd_fma_bf16_to_f32(out, v_data + seq_idx * kv_stride + kv_h * head_dim,
-			raw_exp, head_dim);
+		/* Fused rescale + FMA */
+		simd_rescale_fma_bf16(out, scale_factor,
+			v_data + seq_idx * kv_stride + kv_h * head_dim, raw_exp, head_dim);
 		i++;
 	}
 	if (sum_exp > 0.0f)
@@ -292,9 +292,8 @@ static void	attention_block(float *out, const float *q,
 		scale_factor = fast_expf(prev_max - *max_score);
 		raw_exp = fast_expf(score - *max_score);
 		*sum_exp = (*sum_exp) * scale_factor + raw_exp;
-		/* Rescale and accumulate output */
-		simd_scale_f32(out, scale_factor, head_dim);
-		simd_fma_bf16_to_f32(out, v_ptr, raw_exp, head_dim);
+		/* Fused rescale + FMA */
+		simd_rescale_fma_bf16(out, scale_factor, v_ptr, raw_exp, head_dim);
 		t++;
 	}
 }

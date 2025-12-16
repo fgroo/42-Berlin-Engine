@@ -250,6 +250,50 @@ static inline void	simd_scale_f32(float *vec, float scale, int n)
 }
 
 /*
+** FUSED RESCALE + FMA: out = out * scale1 + bf16_vec * scale2
+** Used in online softmax attention to avoid separate scale + FMA loops.
+** This halves memory bandwidth by reading/writing 'out' only once.
+*/
+static inline void	simd_rescale_fma_bf16(float *out, float scale1,
+				const t_bf16 *vec, float scale2, int n)
+{
+	int	i;
+
+# if SIMD_ENABLED
+	__m256	scale1_vec;
+	__m256	scale2_vec;
+	__m128i	bf16_v;
+	__m256i	v_32;
+	__m256	v_f32;
+	__m256	out_vec;
+
+	scale1_vec = _mm256_set1_ps(scale1);
+	scale2_vec = _mm256_set1_ps(scale2);
+	i = 0;
+	while (i + 7 < n)
+	{
+		/* Load and convert BF16 to F32 */
+		bf16_v = _mm_loadu_si128((__m128i *)(vec + i));
+		v_32 = _mm256_cvtepu16_epi32(bf16_v);
+		v_f32 = _mm256_castsi256_ps(_mm256_slli_epi32(v_32, 16));
+		/* out = out * scale1 + v_f32 * scale2 */
+		out_vec = _mm256_loadu_ps(out + i);
+		out_vec = _mm256_mul_ps(out_vec, scale1_vec);
+		out_vec = _mm256_fmadd_ps(scale2_vec, v_f32, out_vec);
+		_mm256_storeu_ps(out + i, out_vec);
+		i += 8;
+	}
+# else
+	i = 0;
+# endif
+	while (i < n)
+	{
+		out[i] = out[i] * scale1 + bf16_to_float(vec[i]) * scale2;
+		i++;
+	}
+}
+
+/*
 ** Pack 8x 32-bit ints to 8x 16-bit ints (lower 16 bits of each)
 ** Used for FP32 -> BF16 conversion with rounding
 */

@@ -189,7 +189,6 @@ void	paged_kv_append(t_paged_kv_cache *pkv, const float *k, const float *v,
 	t_kv_block		*block;
 	int				kv_size;
 	int				h;
-	int				d;
 
 	bm = pkv->bm;
 	block_idx = pos / KV_BLOCK_SIZE;
@@ -229,14 +228,9 @@ void	paged_kv_append(t_paged_kv_cache *pkv, const float *k, const float *v,
 		/* Source offset: h * head_dim */
 		int src_offset = h * kv_size;
 		
-		/* Convert F32 -> BF16 and store */
-		d = 0;
-		while (d < kv_size)
-		{
-			block->k[dest_offset + d] = float_to_bf16(k[src_offset + d]);
-			block->v[dest_offset + d] = float_to_bf16(v[src_offset + d]);
-			d++;
-		}
+		/* SIMD F32 → BF16 conversion (~8x faster than scalar) */
+		simd_f32_to_bf16(block->k + dest_offset, k + src_offset, kv_size);
+		simd_f32_to_bf16(block->v + dest_offset, v + src_offset, kv_size);
 		h++;
 	}
 	
@@ -321,6 +315,7 @@ void	calc_block_centroid(t_kv_block *block, int head_dim)
 	int		d;
 	float	inv_n;
 	t_bf16	*k_ptr;
+	float	temp[256];  /* Stack buffer for BF16→F32 conversion */
 
 	if (block->n_tokens <= 0)
 		return ;
@@ -333,26 +328,19 @@ void	calc_block_centroid(t_kv_block *block, int head_dim)
 	}
 	/* Sum all keys (from first KV head only - they share representation) */
 	/* Block layout: [kv_head][token][dim] - we use head 0 */
+	/* SIMD path: convert BF16→F32 then accumulate */
 	t = 0;
 	while (t < block->n_tokens)
 	{
 		k_ptr = block->k + t * head_dim;  /* head 0 at offset 0 */
-		d = 0;
-		while (d < head_dim)
-		{
-			block->centroid[d] += bf16_to_float(k_ptr[d]);
-			d++;
-		}
+		/* Convert BF16 keys to F32 temp buffer, then add to centroid */
+		simd_bf16_to_f32(temp, k_ptr, head_dim);
+		simd_add_f32(block->centroid, temp, head_dim);
 		t++;
 	}
-	/* Divide by n_tokens to get mean */
+	/* Divide by n_tokens to get mean (SIMD scale) */
 	inv_n = 1.0f / (float)block->n_tokens;
-	d = 0;
-	while (d < head_dim)
-	{
-		block->centroid[d] *= inv_n;
-		d++;
-	}
+	simd_scale_f32(block->centroid, inv_n, head_dim);
 }
 
 /*

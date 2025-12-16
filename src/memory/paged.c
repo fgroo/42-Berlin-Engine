@@ -3,15 +3,16 @@
 /*                                                        :::      ::::::::   */
 /*   paged.c                                            :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: antigravity <antigravity@student.42.fr>    +#+  +:+       +#+        */
+/*   By: fgroo <fgroo@student.42berlin.de>    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2025/12/14 19:20:00 by antigravity       #+#    #+#             */
-/*   Updated: 2025/12/14 19:20:00 by antigravity      ###   ########.fr       */
+/*   Created: 2025/12/14 19:20:00 by fgroo       #+#    #+#             */
+/*   Updated: 2025/12/14 19:20:00 by fgroo      ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
 #include "paged.h"
 #include "compute/ops_heap.h"
+#include "../safe_alloc.h"  /* xmalloc/xcalloc for safe allocation (Phase 9) */
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>

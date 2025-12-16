@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   sampler_topp_main.c                                :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: marvin <marvin@student.42.fr>              +#+  +:+       +#+        */
+/*   By: fgroo <fgroo@student.42berlin.de>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2025/12/05 00:00:00 by marvin            #+#    #+#             */
-/*   Updated: 2025/12/05 00:00:00 by marvin           ###   ########.fr       */
+/*   Created: 2025/12/05 00:00:00 by fgroo            #+#    #+#             */
+/*   Updated: 2025/12/05 00:00:00 by fgroo           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -67,7 +67,7 @@ int	sample_top_p(const t_tensor *logits, float temperature,
 	float		cum;
 
 	saved = scratch->offset;
-	pi = arena_alloc(scratch, logits->size * sizeof(t_prob_idx));
+	pi = arena_alloc_or_die(scratch, logits->size * sizeof(t_prob_idx));
 	compute_softmax(pi, logits, temperature);
 	qsort(pi, logits->size, sizeof(t_prob_idx), cmp_prob);
 	cum = 0.0f;

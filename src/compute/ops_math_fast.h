@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   ops_math_fast.h                                    :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: antigravity <antigravity@student.42.fr>    +#+  +:+       +#+        */
+/*   By: fgroo <fgroo@student.42berlin.de>    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2025/12/15 02:30:00 by antigravity       #+#    #+#             */
-/*   Updated: 2025/12/15 02:30:00 by antigravity      ###   ########.fr       */
+/*   Created: 2025/12/15 02:30:00 by fgroo       #+#    #+#             */
+/*   Updated: 2025/12/15 02:30:00 by fgroo      ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 

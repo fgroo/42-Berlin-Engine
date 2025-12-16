@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   bench_haystack.c                                   :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: antigravity <antigravity@student.42.fr>    +#+  +:+       +#+        */
+/*   By: fgroo <fgroo@student.42berlin.de>    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2025/12/14 19:50:00 by antigravity       #+#    #+#             */
-/*   Updated: 2025/12/14 19:50:00 by antigravity      ###   ########.fr       */
+/*   Created: 2025/12/14 19:50:00 by fgroo       #+#    #+#             */
+/*   Updated: 2025/12/14 19:50:00 by fgroo      ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -22,6 +22,7 @@
 #include "inference/inference.h"
 #include "tokenizer/tokenizer.h"
 #include "compute/sampler.h"
+#include "compute/ops_lsh.h"
 #include "config.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -196,6 +197,42 @@ int main(int argc, char **argv)
 			SPARSE_BLOCKS_K, t.paged_kv[0].n_blocks);
 	else
 		printf("DENSE PATH: Active (blocks <= threshold)\n");
+
+	/* ====== LSH INTELLIGENCE REPORT (Phase 9: Atomic Stats) ====== */
+	#if DEBUG_LSH
+	{
+		printf("\n=== LSH INTELLIGENCE REPORT (Thread-Safe) ===\n");
+		printf("Total Sparse Queries: %lu\n", 
+			(unsigned long)atomic_load(&t.lsh_stats.total_queries));
+		
+		uint64_t val_count = atomic_load(&t.lsh_stats.validation_count);
+		uint64_t hits = atomic_load(&t.lsh_stats.topk_hits);
+		uint64_t total = atomic_load(&t.lsh_stats.topk_total);
+		if (val_count > 0 && total > 0)
+		{
+			float avg_recall = (float)hits / (float)total;
+			printf("Validations:          %lu\n", (unsigned long)val_count);
+			printf("Avg Recall:           %.1f%% (%s)\n", 
+				avg_recall * 100.0f,
+				avg_recall >= 0.80f ? "✅ OK" : "⚠️  LOW");
+			if (avg_recall < 0.70f)
+				printf("⚠️  CRITICAL: Hash functions may be miscorrelated!\n");
+		}
+		else
+			printf("Avg Recall:           (no validations)\n");
+		
+		uint64_t k_samples = atomic_load(&t.lsh_stats.k_samples);
+		uint64_t used_k = atomic_load(&t.lsh_stats.total_used_k);
+		if (k_samples > 0)
+		{
+			float avg_k = (float)used_k / (float)k_samples;
+			printf("Avg K Used:           %.1f / %d (saved %.1f%%)\n", 
+				avg_k, t.sparse_k,
+				(1.0f - avg_k / (float)t.sparse_k) * 100.0f);
+		}
+		printf("===============================\n");
+	}
+	#endif
 
 	free(tokens);
 	transformer_free(&t);

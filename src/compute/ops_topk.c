@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   ops_topk.c                                         :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: marvin <marvin@student.42.fr>              +#+  +:+       +#+        */
+/*   By: fgroo <fgroo@student.42berlin.de>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2025/12/05 00:00:00 by marvin            #+#    #+#             */
-/*   Updated: 2025/12/08 00:00:00 by marvin           ###   ########.fr       */
+/*   Created: 2025/12/05 00:00:00 by fgroo            #+#    #+#             */
+/*   Updated: 2025/12/08 00:00:00 by fgroo           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -144,7 +144,7 @@ void	op_topk_select(int *indices, const t_tensor *scores,
 	if (k > n)
 		k = n;
 	saved = scratch->offset;
-	temp = arena_alloc(scratch, n * sizeof(t_score_idx));
+	temp = arena_alloc_or_die(scratch, n * sizeof(t_score_idx));
 	if (scores->dtype == DTYPE_F32)
 		fill_temp_f32(temp, (float *)scores->data, n);
 	else

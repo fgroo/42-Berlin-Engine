@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   kv_cache.c                                         :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: marvin <marvin@student.42.fr>              +#+  +:+       +#+        */
+/*   By: fgroo <fgroo@student.42berlin.de>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2025/12/05 00:00:00 by marvin            #+#    #+#             */
-/*   Updated: 2025/12/05 00:00:00 by marvin           ###   ########.fr       */
+/*   Created: 2025/12/05 00:00:00 by fgroo            #+#    #+#             */
+/*   Updated: 2025/12/05 00:00:00 by fgroo           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -28,8 +28,8 @@ void	kv_cache_init(t_kv_cache *c, t_arena *a, t_kv_init_params *p)
 	shape[1] = p->num_heads;
 	shape[2] = p->head_dim;
 	size_bytes = (size_t)p->max_seq * p->num_heads * p->head_dim * sizeof(t_bf16);
-	c->k = tensor_view(arena_alloc(a, size_bytes), shape, 3);
-	c->v = tensor_view(arena_alloc(a, size_bytes), shape, 3);
+	c->k = tensor_view(arena_alloc_or_die(a, size_bytes), shape, 3);
+	c->v = tensor_view(arena_alloc_or_die(a, size_bytes), shape, 3);
 }
 
 static void	convert_f32_to_bf16(t_bf16 *dest, float *src, int n)

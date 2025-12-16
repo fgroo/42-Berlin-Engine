@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   bench_perf.c                                       :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: antigravity <antigravity@student.42.fr>    +#+  +:+       +#+        */
+/*   By: fgroo <fgroo@student.42berlin.de>    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2025/12/14 00:00:00 by antigravity       #+#    #+#             */
-/*   Updated: 2025/12/14 00:00:00 by antigravity      ###   ########.fr       */
+/*   Created: 2025/12/14 00:00:00 by fgroo       #+#    #+#             */
+/*   Updated: 2025/12/14 00:00:00 by fgroo      ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -22,6 +22,8 @@
 #include "inference/inference.h"
 #include "tokenizer/tokenizer.h"
 #include "compute/sampler.h"
+#include "compute/ops_lsh.h"
+#include "config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -294,6 +296,38 @@ int main(int argc, char **argv)
 	printf("═══════════════════════════════════════════════════════════════\n");
 	printf("       GENERATION SPEED: %.2f T/s\n", gen_tps);
 	printf("═══════════════════════════════════════════════════════════════\n");
+
+	/* ====== LSH INTELLIGENCE REPORT (Phase 9: Atomic Stats) ====== */
+	#if DEBUG_LSH
+	{
+		printf("\n=== LSH INTELLIGENCE REPORT (Thread-Safe) ===\n");
+		printf("Total Sparse Queries: %lu\n", 
+			(unsigned long)atomic_load(&t.lsh_stats.total_queries));
+		
+		uint64_t val_count = atomic_load(&t.lsh_stats.validation_count);
+		uint64_t hits = atomic_load(&t.lsh_stats.topk_hits);
+		uint64_t total = atomic_load(&t.lsh_stats.topk_total);
+		if (val_count > 0 && total > 0)
+		{
+			float avg_recall = (float)hits / (float)total;
+			printf("Avg Recall:           %.1f%% (%s)\n", 
+				avg_recall * 100.0f,
+				avg_recall >= 0.80f ? "✅ OK" : "⚠️  LOW");
+			printf("Validations:          %lu\n", (unsigned long)val_count);
+		}
+		else
+			printf("Avg Recall:           (no validations)\n");
+		
+		uint64_t k_samples = atomic_load(&t.lsh_stats.k_samples);
+		uint64_t used_k = atomic_load(&t.lsh_stats.total_used_k);
+		if (k_samples > 0)
+		{
+			float avg_k = (float)used_k / (float)k_samples;
+			printf("Avg K Used:           %.1f / %d\n", avg_k, t.sparse_k);
+		}
+		printf("===============================\n");
+	}
+	#endif
 
 	tokenizer_free(&tok);
 	transformer_free(&t);

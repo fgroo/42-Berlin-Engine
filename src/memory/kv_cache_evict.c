@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   kv_cache_evict.c                                   :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: marvin <marvin@student.42.fr>              +#+  +:+       +#+        */
+/*   By: fgroo <fgroo@student.42berlin.de>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2025/12/05 00:00:00 by marvin            #+#    #+#             */
-/*   Updated: 2025/12/08 00:00:00 by marvin           ###   ########.fr       */
+/*   Created: 2025/12/05 00:00:00 by fgroo            #+#    #+#             */
+/*   Updated: 2025/12/08 00:00:00 by fgroo           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -58,7 +58,7 @@ void	kv_cache_evict(t_kv_cache *c, t_evict_params *p)
 	ctx.heads = c->num_heads;
 	ctx.dim = c->head_dim;
 	ctx.cache = c;
-	ctx.si = arena_alloc(p->scratch, ctx.n * sizeof(t_score_index));
+	ctx.si = arena_alloc_or_die(p->scratch, ctx.n * sizeof(t_score_index));
 	compute_evict_scores(&ctx, p->q, p->w);
 	qsort(ctx.si, ctx.n, sizeof(t_score_index), cmp_score_desc);
 	/* BOUNDS CHECK: Only sort keep_k elements (validated above) */

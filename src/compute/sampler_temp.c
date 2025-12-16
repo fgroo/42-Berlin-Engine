@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   sampler_temp.c                                     :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: marvin <marvin@student.42.fr>              +#+  +:+       +#+        */
+/*   By: fgroo <fgroo@student.42berlin.de>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2025/12/07 00:00:00 by marvin            #+#    #+#             */
-/*   Updated: 2025/12/07 00:00:00 by marvin           ###   ########.fr       */
+/*   Created: 2025/12/07 00:00:00 by fgroo            #+#    #+#             */
+/*   Updated: 2025/12/07 00:00:00 by fgroo           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -101,7 +101,7 @@ int	sample_temperature(const t_tensor *l, float temp, t_arena *scratch)
 	int		result;
 
 	saved = scratch->offset;
-	probs = arena_alloc(scratch, l->size * sizeof(float));
+	probs = arena_alloc_or_die(scratch, l->size * sizeof(float));
 	if (l->dtype == DTYPE_F32)
 		params[0] = find_max_f32((float *)l->data, l->size);
 	else

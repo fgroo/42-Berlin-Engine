@@ -49,7 +49,7 @@ static void	test_tensor(t_arena *arena)
 	shape[0] = 2;
 	shape[1] = 2;
 	size_bytes = 4 * sizeof(t_bf16);
-	data = arena_alloc(arena, size_bytes);
+	data = arena_try_alloc(arena, size_bytes);
 	t = tensor_view(data, shape, 2);
 	printf("[PASS] Tensor view created. Shape: [%d, %d]\n",
 		t.shape[0], t.shape[1]);

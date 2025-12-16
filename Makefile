@@ -33,6 +33,7 @@ LIB_SRCS = $(SRC_DIR)/memory/arena.c \
       $(SRC_DIR)/compute/ops_topk.c \
       $(SRC_DIR)/compute/ops_lsh.c \
       $(SRC_DIR)/compute/ops_silu.c \
+      $(SRC_DIR)/compute/ops_activation.c \
       $(SRC_DIR)/compute/ops_attention.c \
       $(SRC_DIR)/compute/ops_simd.c \
       $(SRC_DIR)/compute/gemm_kernel.c \

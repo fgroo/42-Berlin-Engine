@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   ops_silu.c                                         :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: marvin <marvin@student.42.fr>              +#+  +:+       +#+        */
+/*   By: fgroo <fgroo@student.42berlin.de>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2025/12/07 00:00:00 by marvin            #+#    #+#             */
-/*   Updated: 2025/12/08 00:00:00 by marvin           ###   ########.fr       */
+/*   Created: 2025/12/07 00:00:00 by fgroo            #+#    #+#             */
+/*   Updated: 2025/12/08 00:00:00 by fgroo           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -16,56 +16,44 @@
 #include <omp.h>
 
 /*
-** OpenMP-parallelized SwiGLU kernel: out = SiLU(gate) * val
-** SiLU(x) = x * sigmoid(x) = x / (1 + exp(-x))
-** 
-** Note: exp() is hard to vectorize without external libs.
-** OpenMP parallelization across hidden_dim (9216) gives good speedup.
-** Each of 8 threads processes ~1152 elements.
+** FUSED AVX2 SwiGLU kernel: out = SiLU(gate) * val
+** Uses fast_expf_avx2 for ~21x speedup over scalar expf
+** See ops_activation.c for implementation details (Phase 6)
 */
+
+#include "ops_activation.h"
 
 static void	silu_mul_f32(t_tensor *out, const t_tensor *gate,
 				const t_tensor *val)
 {
-	size_t	size;
 	float	*out_data;
 	float	*gate_data;
 	float	*val_data;
+	size_t	size;
 
 	out_data = (float *)out->data;
 	gate_data = (float *)gate->data;
 	val_data = (float *)val->data;
 	size = out->size;
-	#pragma omp parallel for schedule(static)
-	for (size_t i = 0; i < size; i++)
-	{
-		float g = gate_data[i];
-		float v = val_data[i];
-		float sigmoid = 1.0f / (1.0f + expf(-g));
-		out_data[i] = g * sigmoid * v;
-	}
+	/* Use fused AVX2 kernel (Phase 6: 21x speedup) */
+	op_silu_mul_fused_f32(out_data, gate_data, val_data, size);
 }
 
 static void	silu_mul_bf16(t_tensor *out, const t_tensor *gate,
 				const t_tensor *val)
 {
-	size_t	size;
 	t_bf16	*out_data;
 	t_bf16	*gate_data;
 	t_bf16	*val_data;
+	size_t	size;
 
 	out_data = (t_bf16 *)out->data;
 	gate_data = (t_bf16 *)gate->data;
 	val_data = (t_bf16 *)val->data;
 	size = out->size;
-	#pragma omp parallel for schedule(static)
-	for (size_t i = 0; i < size; i++)
-	{
-		float g = bf16_to_float(gate_data[i]);
-		float v = bf16_to_float(val_data[i]);
-		float sigmoid = 1.0f / (1.0f + expf(-g));
-		out_data[i] = float_to_bf16(g * sigmoid * v);
-	}
+	/* Use fused AVX2 kernel (Phase 6: 21x speedup) */
+	op_silu_mul_fused_bf16((uint16_t *)out_data, (const uint16_t *)gate_data,
+		(const uint16_t *)val_data, size);
 }
 
 static int	check_silu_dtypes(t_tensor *out, const t_tensor *gate,

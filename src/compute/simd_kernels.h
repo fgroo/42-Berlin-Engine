@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   simd_kernels.h                                     :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: antigravity <antigravity@student.42.fr>    +#+  +:+       +#+        */
+/*   By: fgroo <fgroo@student.42berlin.de>    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2025/12/14 18:30:00 by antigravity       #+#    #+#             */
-/*   Updated: 2025/12/14 18:30:00 by antigravity      ###   ########.fr       */
+/*   Created: 2025/12/14 18:30:00 by fgroo       #+#    #+#             */
+/*   Updated: 2025/12/14 18:30:00 by fgroo      ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -14,6 +14,7 @@
 # define SIMD_KERNELS_H
 
 # include <stdint.h>
+# include <string.h>  /* memcpy for simd_bf16_to_f32 scalar fallback */
 # include "ops_internal.h"
 
 /*
@@ -39,6 +40,16 @@
 # endif
 
 /*
+** AVX-512 Detection (512-bit vectors, 32 registers)
+** 2x theoretical throughput over AVX2 on supported CPUs (Skylake-X, Zen4)
+*/
+# ifdef __AVX512F__
+#  define SIMD_512_ENABLED 1
+# else
+#  define SIMD_512_ENABLED 0
+# endif
+
+/*
 ** Horizontal sum of 8 floats in __m256 register
 ** Returns scalar float
 */
@@ -58,38 +69,77 @@ static inline float	simd_hsum_ps(__m256 v)
 # endif
 
 /*
+** Horizontal sum of 16 floats in __m512 register (AVX-512)
+** Reduces 512-bit to scalar in log2(16) = 4 steps
+*/
+# if SIMD_512_ENABLED
+static inline float	simd_hsum_512(__m512 v)
+{
+	__m256	lo256;
+	__m256	hi256;
+
+	/* Split 512 -> 2x256 and add */
+	lo256 = _mm512_castps512_ps256(v);
+	hi256 = _mm512_extractf32x8_ps(v, 1);
+	lo256 = _mm256_add_ps(lo256, hi256);
+	/* Use existing 256-bit reduction */
+	return (simd_hsum_ps(lo256));
+}
+# endif
+
+/*
 ** Dot product: BF16 vector × F32 vector
 ** Returns scalar float
-** SIMD: processes 8 elements per iteration
+** AVX-512: processes 16 elements per iteration (2x throughput)
+** AVX2: processes 8 elements per iteration
 */
 static inline float	simd_dot_bf16_f32(const t_bf16 *a, const float *b, int n)
 {
 	float	sum;
 	int		i;
 
-# if SIMD_ENABLED
-	__m256	sum_vec;
-	__m128i	bf16_a;
-	__m256i	a_32;
-	__m256	a_f32;
-	__m256	b_vec;
-
-	sum_vec = _mm256_setzero_ps();
+# if SIMD_512_ENABLED
+	/* AVX-512 fast path: 16 elements per iteration */
+	__m512	sum_vec_512 = _mm512_setzero_ps();
 	i = 0;
-	while (i + 7 < n)
+	while (i + 15 < n)
 	{
-		bf16_a = _mm_loadu_si128((__m128i *)(a + i));
-		a_32 = _mm256_cvtepu16_epi32(bf16_a);
-		a_f32 = _mm256_castsi256_ps(_mm256_slli_epi32(a_32, 16));
-		b_vec = _mm256_loadu_ps(b + i);
-		sum_vec = _mm256_fmadd_ps(a_f32, b_vec, sum_vec);
-		i += 8;
+		/* Load 16x BF16 (256 bits) */
+		__m256i bf16_256 = _mm256_loadu_si256((__m256i *)(a + i));
+		/* Expand to 16x 32-bit and shift to F32 position */
+		__m512i a_512_i = _mm512_cvtepu16_epi32(bf16_256);
+		__m512 a_512_f = _mm512_castsi512_ps(_mm512_slli_epi32(a_512_i, 16));
+		/* Load 16x F32 */
+		__m512 b_512 = _mm512_loadu_ps(b + i);
+		/* FMA */
+		sum_vec_512 = _mm512_fmadd_ps(a_512_f, b_512, sum_vec_512);
+		i += 16;
 	}
-	sum = simd_hsum_ps(sum_vec);
+	sum = simd_hsum_512(sum_vec_512);
+	/* Fall through to AVX2 for 8-15 element remainder */
+# elif SIMD_ENABLED
+	sum = 0.0f;
+	i = 0;
 # else
 	sum = 0.0f;
 	i = 0;
 # endif
+
+# if SIMD_ENABLED
+	/* AVX2 cleanup: processes remaining elements 8 at a time */
+	__m256	sum_vec = _mm256_setzero_ps();
+	while (i + 7 < n)
+	{
+		__m128i bf16_a = _mm_loadu_si128((__m128i *)(a + i));
+		__m256i a_32 = _mm256_cvtepu16_epi32(bf16_a);
+		__m256 a_f32 = _mm256_castsi256_ps(_mm256_slli_epi32(a_32, 16));
+		__m256 b_vec = _mm256_loadu_ps(b + i);
+		sum_vec = _mm256_fmadd_ps(a_f32, b_vec, sum_vec);
+		i += 8;
+	}
+	sum += simd_hsum_ps(sum_vec);
+# endif
+	/* Scalar remainder */
 	while (i < n)
 	{
 		sum += bf16_to_float(a[i]) * b[i];
@@ -246,6 +296,87 @@ static inline void	simd_f32_to_bf16(t_bf16 *out, const float *in, int n)
 	while (i < n)
 	{
 		out[i] = float_to_bf16(in[i]);
+		i++;
+	}
+}
+
+/*
+** SIMD Vector Addition: dst[i] += src[i]
+** Used for residual connections (x += xb)
+** AVX-512: 16 floats per iteration, AVX2: 8 floats per iteration
+*/
+static inline void	simd_add_f32(float *dst, const float *src, int n)
+{
+	int	i;
+
+# if SIMD_512_ENABLED
+	/* AVX-512 fast path: 16 floats per iteration */
+	i = 0;
+	while (i + 15 < n)
+	{
+		_mm512_storeu_ps(dst + i,
+			_mm512_add_ps(_mm512_loadu_ps(dst + i), _mm512_loadu_ps(src + i)));
+		i += 16;
+	}
+	/* Fall through to AVX2 for remainder */
+# elif SIMD_ENABLED
+	i = 0;
+# else
+	i = 0;
+# endif
+
+# if SIMD_ENABLED
+	/* AVX2 cleanup: 8 floats at a time */
+	while (i + 7 < n)
+	{
+		_mm256_storeu_ps(dst + i,
+			_mm256_add_ps(_mm256_loadu_ps(dst + i), _mm256_loadu_ps(src + i)));
+		i += 8;
+	}
+# endif
+	/* Scalar remainder */
+	while (i < n)
+	{
+		dst[i] += src[i];
+		i++;
+	}
+}
+
+/*
+** SIMD BF16→F32 Conversion (Batch)
+** Used for embedding lookup - replaces scalar memcpy loop
+** Processes 8 elements per iteration with AVX2
+*/
+static inline void	simd_bf16_to_f32(float *dst, const uint16_t *src, int n)
+{
+	int	i;
+
+# if SIMD_ENABLED
+	__m128i	bf16_vals;
+	__m256i	int32_vals;
+	__m256i	f32_bits;
+
+	i = 0;
+	while (i + 7 < n)
+	{
+		/* Load 8x BF16 (128 bits) */
+		bf16_vals = _mm_loadu_si128((__m128i *)(src + i));
+		/* Expand to 8x 32-bit integers */
+		int32_vals = _mm256_cvtepu16_epi32(bf16_vals);
+		/* Shift left 16 to get F32 bit pattern */
+		f32_bits = _mm256_slli_epi32(int32_vals, 16);
+		/* Store as float */
+		_mm256_storeu_ps(dst + i, _mm256_castsi256_ps(f32_bits));
+		i += 8;
+	}
+# else
+	i = 0;
+# endif
+	/* Scalar remainder */
+	while (i < n)
+	{
+		uint32_t val = (uint32_t)src[i] << 16;
+		memcpy(&dst[i], &val, sizeof(float));
 		i++;
 	}
 }

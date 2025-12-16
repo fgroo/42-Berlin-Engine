@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   backward.c                                         :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: antigravity <antigravity@student.42.fr>    +#+  +:+       +#+        */
+/*   By: fgroo <fgroo@student.42berlin.de>    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2025/12/14 18:30:00 by antigravity       #+#    #+#             */
-/*   Updated: 2025/12/14 18:30:00 by antigravity      ###   ########.fr       */
+/*   Created: 2025/12/14 18:30:00 by fgroo       #+#    #+#             */
+/*   Updated: 2025/12/14 18:30:00 by fgroo      ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -60,15 +60,15 @@ void	backward_zero_grads(t_transformer *t)
 */
 void	backward_apply_grads(t_transformer *t, float lr)
 {
-	int		layer;
-	int		i;
-	size_t	size;
-	float	*grad;
-	t_bf16	*weight;
-	float	g;
-	float	w;
-	float	grad_norm;
-	float	scale;
+	int					layer;
+	int					i;
+	size_t				size;
+	float				*grad;
+	t_bf16				*weight;
+	float				g;
+	float				grad_norm;
+	float				scale;
+	t_xorshift_state	rng;
 
 	if (!t->fluid_layers)
 		return ;
@@ -88,6 +88,9 @@ void	backward_apply_grads(t_transformer *t, float lr)
 			layer--;
 			continue ;
 		}
+		/* Initialize per-layer RNG with unique seed */
+		/* layer + time + 1 ensures non-zero seed for different layers */
+		xorshift_init(&rng, (uint64_t)layer * 0xDEADBEEF + 0x42424242ULL);
 		/* GLOBAL GRADIENT NORM CLIPPING */
 		/* Compute L2 norm using SIMD (16x faster than scalar loop) */
 		grad_norm = ops_simd_norm(grad, size);
@@ -97,7 +100,8 @@ void	backward_apply_grads(t_transformer *t, float lr)
 		scale = 1.0f;
 		if (grad_norm > 1.0f)
 			scale = 1.0f / grad_norm;
-		/* Apply gradient update with scaling */
+		/* Apply gradient update with STOCHASTIC ROUNDING */
+		/* This preserves small gradients statistically (Critical #3 Fix) */
 		i = 0;
 		while (i < (int)size)
 		{
@@ -107,9 +111,9 @@ void	backward_apply_grads(t_transformer *t, float lr)
 				g = GRADIENT_CLIP;
 			if (g < -GRADIENT_CLIP)
 				g = -GRADIENT_CLIP;
-			/* SGD update: w = w - lr * g */
-			w = bf16_to_float(weight[i]) - lr * g;
-			weight[i] = float_to_bf16(w);
+			/* STOCHASTIC SGD update: w = w - lr * g with SR */
+			/* Small updates (< BF16 ULP) now have probability of rounding up */
+			bf16_stochastic_update(&weight[i], lr * g, &rng);
 			i++;
 		}
 		layer--;
@@ -164,6 +168,10 @@ static void	backprop_output_layer(t_transformer *t, float *grad_x)
 /*
 ** Accumulate gradients for a single layer in FP32
 ** grad_acc[i,j] += grad_x[i] * hb_cache[j]
+**
+** CRITICAL FIX (Phase 10): AVX2 SIMD Vectorization
+** The outer product ∇W += δ · xᵀ is now processed 8 floats per iteration
+** using FMA instructions. This yields ~6-8x speedup on the backward pass.
 */
 static void	accumulate_layer_grads(t_transformer *t, int layer)
 {
@@ -174,14 +182,17 @@ static void	accumulate_layer_grads(t_transformer *t, int layer)
 	int						i;
 	int						j;
 	float					grad_xi;
+	float					*grad_row;
+	int						hidden;
 
 	c = &t->config;
 	fl = &t->fluid_layers[layer];
 	grad = fl->grad_acc;
 	hb = fl->hb_cache;
+	hidden = c->hidden_dim;
 	if (!grad || !hb)
 		return ;
-	#pragma omp parallel for schedule(static) private(j, grad_xi)
+	#pragma omp parallel for schedule(static) private(j, grad_xi, grad_row)
 	for (i = 0; i < c->dim; i++)
 	{
 		grad_xi = t->state.grad_x[i];
@@ -190,12 +201,41 @@ static void	accumulate_layer_grads(t_transformer *t, int layer)
 			grad_xi = GRADIENT_CLIP;
 		if (grad_xi < -GRADIENT_CLIP)
 			grad_xi = -GRADIENT_CLIP;
-		j = 0;
-		while (j < c->hidden_dim)
+		grad_row = grad + i * hidden;
+#ifdef __AVX2__
+		/* AVX2 SIMD path: process 8 floats per iteration with FMA */
 		{
-			grad[i * c->hidden_dim + j] += grad_xi * hb[j];
+			__m256	v_grad_xi;
+			__m256	v_grad;
+			__m256	v_hb;
+
+			v_grad_xi = _mm256_set1_ps(grad_xi);
+			j = 0;
+			/* Main loop: 8 floats at a time */
+			while (j + 7 < hidden)
+			{
+				v_grad = _mm256_loadu_ps(grad_row + j);
+				v_hb = _mm256_loadu_ps(hb + j);
+				v_grad = _mm256_fmadd_ps(v_grad_xi, v_hb, v_grad);
+				_mm256_storeu_ps(grad_row + j, v_grad);
+				j += 8;
+			}
+			/* Scalar cleanup for remainder */
+			while (j < hidden)
+			{
+				grad_row[j] += grad_xi * hb[j];
+				j++;
+			}
+		}
+#else
+		/* Scalar fallback */
+		j = 0;
+		while (j < hidden)
+		{
+			grad_row[j] += grad_xi * hb[j];
 			j++;
 		}
+#endif
 	}
 }
 

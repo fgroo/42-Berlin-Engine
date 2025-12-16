@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   config.h                                           :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: marvin <marvin@student.42.fr>              +#+  +:+       +#+        */
+/*   By: fgroo <fgroo@student.42berlin.de>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2025/12/07 00:00:00 by marvin            #+#    #+#             */
-/*   Updated: 2025/12/07 00:00:00 by marvin           ###   ########.fr       */
+/*   Created: 2025/12/07 00:00:00 by fgroo            #+#    #+#             */
+/*   Updated: 2025/12/07 00:00:00 by fgroo           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -82,6 +82,23 @@
 // Max steps per turn to prevent overfitting and mode collapse
 # ifndef NL_MAX_STEPS
 #  define NL_MAX_STEPS 10
+# endif
+
+// ========== LSH DIAGNOSTICS (Phase 8) ==========
+// Enable runtime LSH recall validation (expensive - samples every N queries)
+# ifndef DEBUG_LSH
+#  define DEBUG_LSH 1  /* Set to 0 for production */
+# endif
+
+// How often to validate LSH recall (every N sparse queries)
+// Set to 1 for calibration, 100 for production
+# ifndef LSH_VALIDATION_INTERVAL
+#  define LSH_VALIDATION_INTERVAL 100  /* PRODUCTION MODE */
+# endif
+
+// Adaptive K probability mass threshold (0.95 = 95% of attention mass)
+# ifndef ADAPTIVE_K_THRESHOLD
+#  define ADAPTIVE_K_THRESHOLD 0.95f
 # endif
 
 #endif

@@ -9,6 +9,7 @@
 # include "memory/arena.h"
 # include <stdatomic.h>  // C11 atomics for thread-safe NL counters
 # include "nested/nl_counters.h"  // CAS-based lock-free NL counters
+# include "compute/ops_lsh.h"  // Thread-safe LSH stats (Phase 9)
 
 typedef struct s_transformer_config
 {
@@ -122,6 +123,7 @@ typedef struct s_transformer
 	float				*rope_thetas;      // Precomputed RoPE theta values [head_dim/2]
 	void				*lsh_ctx;          // LSH context for sparse routing (t_lsh_ctx*)
 	void				*lsh_index;        // LSH block index (t_lsh_index*)
+	t_lsh_stats_atomic	lsh_stats;     // Thread-safe LSH diagnostics (Phase 9)
 	int					use_lsh;           // Enable LSH-based sparse attention
 	t_vision_tower			*vision;       // NULL = text-only mode (lazy vision)
 	/*

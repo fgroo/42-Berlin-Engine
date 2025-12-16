@@ -3,10 +3,10 @@
 /*                                                        :::      ::::::::   */
 /*   ops_matmul.c                                       :+:      :+:    :+:   */
 /*                                                    +:+ +:+         +:+     */
-/*   By: antigravity <antigravity@student.42.fr>    +#+  +:+       +#+        */
+/*   By: fgroo <fgroo@student.42berlin.de>    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
-/*   Created: 2025/12/05 00:00:00 by marvin            #+#    #+#             */
-/*   Updated: 2025/12/14 17:00:00 by antigravity      ###   ########.fr       */
+/*   Created: 2025/12/05 00:00:00 by fgroo            #+#    #+#             */
+/*   Updated: 2025/12/14 17:00:00 by fgroo      ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -281,6 +281,81 @@ static void	gemm_bf16_f32_tiled(float *c, const t_bf16 *a, const float *b,
 		}
 	}
 }
+
+/*
+** ============================================================================
+** GEMM: F32 × F32 → F32 with Cache Blocking (Phase 10 Fix)
+** ============================================================================
+** Same tiling strategy as BF16 version but without conversion overhead.
+** Used for F32 intermediate computations (rare but needed for some paths).
+*/
+static void	gemm_f32_f32_tiled(float *c, const float *a, const float *b,
+				int m, int n, int k)
+{
+	int		i0;
+	int		j0;
+	int		k0;
+
+	/* Zero output */
+	memset(c, 0, m * n * sizeof(float));
+
+	/* Outer loops: tile over m, n, k */
+	#pragma omp parallel for collapse(2) schedule(static)
+	for (i0 = 0; i0 < m; i0 += MC)
+	{
+		for (j0 = 0; j0 < n; j0 += NC)
+		{
+			int	i_max;
+			int	j_max;
+			int	k_max;
+			int	ii;
+			int	kk;
+			int	jj;
+
+			i_max = (i0 + MC > m) ? m : i0 + MC;
+			j_max = (j0 + NC > n) ? n : j0 + NC;
+
+			/* K-loop: accumulate into C tile */
+			for (k0 = 0; k0 < k; k0 += KC)
+			{
+				k_max = (k0 + KC > k) ? k : k0 + KC;
+
+				/* Micro-kernel: compute one MC x NC tile */
+				for (ii = i0; ii < i_max; ii++)
+				{
+					const float	*a_row = a + ii * k + k0;
+					float		*c_row = c + ii * n + j0;
+
+					for (kk = 0; kk < k_max - k0; kk++)
+					{
+						/* Broadcast A value */
+						float		a_val = a_row[kk];
+						__m256		a_vec = _mm256_set1_ps(a_val);
+						const float	*b_row = b + (k0 + kk) * n + j0;
+
+						/* Inner loop: vectorized over j */
+						jj = 0;
+						while (jj + 7 < j_max - j0)
+						{
+							__m256	c_vec = _mm256_loadu_ps(c_row + jj);
+							__m256	b_vec = _mm256_loadu_ps(b_row + jj);
+							c_vec = _mm256_fmadd_ps(a_vec, b_vec, c_vec);
+							_mm256_storeu_ps(c_row + jj, c_vec);
+							jj += 8;
+						}
+
+						/* Scalar remainder */
+						while (jj < j_max - j0)
+						{
+							c_row[jj] += a_val * b_row[jj];
+							jj++;
+						}
+					}
+				}
+			}
+		}
+	}
+}
 #endif
 
 /*
@@ -368,7 +443,12 @@ int	op_matmul(t_tensor *out, const t_tensor *a, const t_tensor *b)
 		}
 		else
 		{
-			/* Naive GEMM for F32 (rare path) */
+#if USE_SIMD
+			/* SIMD-optimized tiled GEMM (Phase 10 Fix) */
+			gemm_f32_f32_tiled((float *)out->data,
+				(float *)a->data, (float *)b->data, m, n, k);
+#else
+			/* Fallback: naive GEMM */
 			float *out_data = (float *)out->data;
 			float *a_data = (float *)a->data;
 			float *b_data = (float *)b->data;
@@ -383,6 +463,7 @@ int	op_matmul(t_tensor *out, const t_tensor *a, const t_tensor *b)
 					out_data[i * n + j] = sum;
 				}
 			}
+#endif
 		}
 	}
 	else

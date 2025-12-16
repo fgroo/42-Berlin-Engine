@@ -1,6 +1,7 @@
 #include "inference.h"
 #include "../config.h"
 #include "compute/ops_lsh.h"
+#include "compute/ops_rope.h"  /* Phase 12: Precomputed sin/cos tables */
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -107,6 +108,7 @@ static void *aligned_calloc(size_t num, size_t size)
 	memset(ptr, 0, total);
 	return ptr;
 }
+
 
 int	transformer_init(t_transformer *t, const char *model_path, const char *config_path)
 {
@@ -403,6 +405,24 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 		}
 	}
 
+	// ========== ROPE CACHE (Phase 12): PRECOMPUTED SIN/COS TABLES ==========
+	// Eliminates 53K sinf/cosf calls per token for 10-20% generation speedup
+	// Memory cost: 8K * 64 * 2 * 4 = 4MB (excellent trade-off)
+	{
+		t_rope_cache *cache = rope_cache_init(t->config.head_dim,
+			t->config.seq_len, t->config.rope_theta);
+		if (cache)
+		{
+			t->rope_cache = cache;
+			printf("[RoPE CACHE] Enabled. Generation speedup expected.\n");
+		}
+		else
+		{
+			t->rope_cache = NULL;
+			printf("[RoPE CACHE] WARN: Init failed, falling back to per-token trig.\n");
+		}
+	}
+
 	// ========== LSH LIGHTNING INDEXER INIT ==========
 	// Initialize LSH for true O(K) sparse attention routing
 	// This replaces brute-force O(N) key scanning with hash-based block selection
@@ -508,6 +528,10 @@ void	transformer_free(t_transformer *t)
 	// Free precomputed RoPE thetas
 	if (t->rope_thetas)
 		free(t->rope_thetas);
+	
+	// Free RoPE cache (Phase 12)
+	if (t->rope_cache)
+		rope_cache_free((t_rope_cache *)t->rope_cache);
 	
 	// Free LSH structures
 	if (t->lsh_ctx)

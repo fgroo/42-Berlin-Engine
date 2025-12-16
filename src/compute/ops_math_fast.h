@@ -197,11 +197,36 @@ static inline __m256	fast_softmax_exp_avx2(__m256 x, __m256 max_val)
 ** ============================================================================
 */
 
-/* Thread-local PRNG state for stochastic rounding */
-static __thread uint32_t	g_sr_state = 0xDEADBEEF;
+/*
+** Thread-local PRNG state for stochastic rounding
+** CRITICAL FIX: Each thread gets a UNIQUE seed based on thread ID + time + PID.
+** Previously all threads shared 0xDEADBEEF, causing correlated random sequences.
+*/
+static __thread uint32_t	g_sr_state = 0;
+static __thread int			g_sr_initialized = 0;
+
+# include <pthread.h>
+# include <time.h>
+# include <unistd.h>
+
+static inline void	init_sr_state_if_needed(void)
+{
+	if (!g_sr_initialized)
+	{
+		/* Mix thread ID, time, and PID for unique seed per thread */
+		g_sr_state = (uint32_t)((uintptr_t)pthread_self() ^
+			(uint32_t)time(NULL) ^ (uint32_t)getpid() ^ 0xDEADBEEF);
+		/* Ensure non-zero (xorshift fails with zero state) */
+		if (g_sr_state == 0)
+			g_sr_state = 0x12345678;
+		g_sr_initialized = 1;
+	}
+}
 
 static inline uint32_t	fast_rand16(void)
 {
+	/* Lazy initialization on first call */
+	init_sr_state_if_needed();
 	/* Xorshift32 - fast, decent quality */
 	g_sr_state ^= g_sr_state << 13;
 	g_sr_state ^= g_sr_state >> 17;

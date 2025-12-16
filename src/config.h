@@ -87,7 +87,7 @@
 // ========== LSH DIAGNOSTICS (Phase 8) ==========
 // Enable runtime LSH recall validation (expensive - samples every N queries)
 # ifndef DEBUG_LSH
-#  define DEBUG_LSH 1  /* Set to 0 for production */
+#  define DEBUG_LSH 0  /* Production: 0, Debug: 1 */
 # endif
 
 // How often to validate LSH recall (every N sparse queries)

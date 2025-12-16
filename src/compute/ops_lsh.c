@@ -255,6 +255,9 @@ void	lsh_insert_block(t_lsh_index *idx, uint16_t hash, int start_pos, int len)
 /*
 ** Incremental update: called for each new key added to KV cache
 ** Accumulates keys, commits block when full
+**
+** CRITICAL FIX: Protected with omp critical to prevent race conditions.
+** Multiple threads updating active block concurrently caused index corruption.
 */
 void	lsh_update(t_lsh_index *idx, const t_lsh_ctx *ctx,
 			const float *key, int dim, int pos)
@@ -265,44 +268,54 @@ void	lsh_update(t_lsh_index *idx, const t_lsh_ctx *ctx,
 	uint16_t	hash;
 	int			d;
 
-	acc = &idx->active;
-	/* Track start position of new block */
-	if (acc->count == 0)
-		acc->start_pos = pos;
-	/* Accumulate key into sum buffer (SIMD) */
-	d = 0;
-	while (d + 7 < dim && d < LSH_MAX_DIM)
+	/*
+	** THREAD SAFETY: The active block accumulator is shared state.
+	** Without synchronization, concurrent updates cause:
+	** - Corrupted centroid sums (partial updates interleaved)
+	** - Lost block boundaries (incorrect start_pos/count)
+	** - Missed block commits (count check races)
+	*/
+	#pragma omp critical(lsh_update_lock)
 	{
-		__m256 sum = _mm256_loadu_ps(acc->sum_buffer + d);
-		__m256 k = _mm256_loadu_ps(key + d);
-		_mm256_storeu_ps(acc->sum_buffer + d, _mm256_add_ps(sum, k));
-		d += 8;
-	}
-	while (d < dim && d < LSH_MAX_DIM)
-	{
-		acc->sum_buffer[d] += key[d];
-		d++;
-	}
-	acc->count++;
-	/* Block full? Commit to index! */
-	if (acc->count >= LSH_BLOCK_SIZE)
-	{
-		/* Compute centroid = sum / count */
-		scale = 1.0f / (float)acc->count;
+		acc = &idx->active;
+		/* Track start position of new block */
+		if (acc->count == 0)
+			acc->start_pos = pos;
+		/* Accumulate key into sum buffer (SIMD) */
 		d = 0;
+		while (d + 7 < dim && d < LSH_MAX_DIM)
+		{
+			__m256 sum = _mm256_loadu_ps(acc->sum_buffer + d);
+			__m256 k = _mm256_loadu_ps(key + d);
+			_mm256_storeu_ps(acc->sum_buffer + d, _mm256_add_ps(sum, k));
+			d += 8;
+		}
 		while (d < dim && d < LSH_MAX_DIM)
 		{
-			centroid[d] = acc->sum_buffer[d] * scale;
+			acc->sum_buffer[d] += key[d];
 			d++;
 		}
-		/* Hash centroid */
-		hash = lsh_hash(ctx, centroid);
-		/* Insert into index */
-		lsh_insert_block(idx, hash, acc->start_pos, acc->count);
-		/* Reset accumulator */
-		memset(acc->sum_buffer, 0, sizeof(acc->sum_buffer));
-		acc->count = 0;
-	}
+		acc->count++;
+		/* Block full? Commit to index! */
+		if (acc->count >= LSH_BLOCK_SIZE)
+		{
+			/* Compute centroid = sum / count */
+			scale = 1.0f / (float)acc->count;
+			d = 0;
+			while (d < dim && d < LSH_MAX_DIM)
+			{
+				centroid[d] = acc->sum_buffer[d] * scale;
+				d++;
+			}
+			/* Hash centroid */
+			hash = lsh_hash(ctx, centroid);
+			/* Insert into index */
+			lsh_insert_block(idx, hash, acc->start_pos, acc->count);
+			/* Reset accumulator */
+			memset(acc->sum_buffer, 0, sizeof(acc->sum_buffer));
+			acc->count = 0;
+		}
+	}  /* end omp critical */
 }
 
 /*

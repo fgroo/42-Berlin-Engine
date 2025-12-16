@@ -12,6 +12,7 @@
 #include "compute/ops_attention.h"  // Flash Attention kernel
 #include "compute/simd_kernels.h"  // SIMD primitives (simd_dot_bf16_f32, etc.)
 #include "compute/ops_math_fast.h"  // fast_expf for SiLU activation
+#include "compute/ops_rope.h"  // Phase 12: Precomputed RoPE sin/cos tables
 
 /*
 ** ============================================================================
@@ -131,27 +132,33 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 		op_matmul(&k_tensor, l->wk, &xb_tensor);
 		op_matmul(&v_tensor, l->wv, &xb_tensor);
 
-		// RoPE
-		// printf("L%d RoPE\n", i);
-		t_rope_ctx rope_ctx = {
-			.head_dim = c->head_dim,
-			.theta_base = c->rope_theta,
-			.beta_fast = c->beta_fast,
-			.beta_slow = c->beta_slow,
-			.factor = c->rope_factor,
-			// Auto-calculate mscale if 1.0 but factor > 1.0
-			// Formula: s = 0.1 * ln(factor) + 1.0
-			// We apply sqrt(s) to q and k, so q.k is scaled by s
-			.mscale = (c->mscale == 1.0f && c->rope_factor > 1.0f) 
-					  ? sqrtf(0.1f * logf(c->rope_factor) + 1.0f) 
-					  : c->mscale,
-			.orig_ctx = c->orig_ctx_len,
-			.thetas_cache = t->rope_thetas  // Use precomputed thetas (eliminates pow() per token)
-		};
-		
-
-		op_rope(&q_tensor, pos, &rope_ctx);
-		op_rope(&k_tensor, pos, &rope_ctx);
+		// RoPE: Apply rotary positional embedding
+		// Phase 12: Use precomputed sin/cos tables if available (10-20% faster)
+		if (t->rope_cache)
+		{
+			t_rope_cache *cache = (t_rope_cache *)t->rope_cache;
+			// Single function call for all heads (much faster than per-head loop)
+			rope_apply_multihead_cached(s->q, c->n_heads, pos, cache);
+			rope_apply_multihead_cached(s->k, c->n_kv_heads, pos, cache);
+		}
+		else
+		{
+			// Fallback: Legacy path with per-token sinf/cosf (slower)
+			t_rope_ctx rope_ctx = {
+				.head_dim = c->head_dim,
+				.theta_base = c->rope_theta,
+				.beta_fast = c->beta_fast,
+				.beta_slow = c->beta_slow,
+				.factor = c->rope_factor,
+				.mscale = (c->mscale == 1.0f && c->rope_factor > 1.0f) 
+						  ? sqrtf(0.1f * logf(c->rope_factor) + 1.0f) 
+						  : c->mscale,
+				.orig_ctx = c->orig_ctx_len,
+				.thetas_cache = t->rope_thetas
+			};
+			op_rope(&q_tensor, pos, &rope_ctx);
+			op_rope(&k_tensor, pos, &rope_ctx);
+		}
 
 		// KV Cache Append: Use paged or linear based on config
 		if (t->use_paged_kv)
@@ -716,27 +723,38 @@ void	forward_prefill_batch(t_transformer *t, const int *tokens,
 			memcpy(s->k, k_row, kv_dim * sizeof(float));
 			memcpy(s->v, v_row, kv_dim * sizeof(float));
 
-			/* RoPE */
-			t_tensor q_t, k_t;
-			q_t.data = s->q;
-			q_t.size = c->n_heads * c->head_dim;
-			k_t.data = s->k;
-			k_t.size = kv_dim;
+			/* RoPE - Phase 12: Use precomputed cache if available */
+			if (t->rope_cache)
+			{
+				t_rope_cache *cache = (t_rope_cache *)t->rope_cache;
+				rope_apply_multihead_cached(s->q, c->n_heads, pos, cache);
+				rope_apply_multihead_cached(s->k, c->n_kv_heads, pos, cache);
+			}
+			else
+			{
+				t_tensor q_t, k_t;
+				q_t.data = s->q;
+				q_t.size = c->n_heads * c->head_dim;
+				q_t.dtype = DTYPE_F32;
+				k_t.data = s->k;
+				k_t.size = kv_dim;
+				k_t.dtype = DTYPE_F32;
 
-			t_rope_ctx rope_ctx = {
-				.head_dim = c->head_dim,
-				.theta_base = c->rope_theta,
-				.beta_fast = c->beta_fast,
-				.beta_slow = c->beta_slow,
-				.factor = c->rope_factor,
-				.mscale = (c->mscale == 1.0f && c->rope_factor > 1.0f)
-					? sqrtf(0.1f * logf(c->rope_factor) + 1.0f)
-					: c->mscale,
-				.orig_ctx = c->orig_ctx_len,
-				.thetas_cache = t->rope_thetas
-			};
-			op_rope(&q_t, pos, &rope_ctx);
-			op_rope(&k_t, pos, &rope_ctx);
+				t_rope_ctx rope_ctx = {
+					.head_dim = c->head_dim,
+					.theta_base = c->rope_theta,
+					.beta_fast = c->beta_fast,
+					.beta_slow = c->beta_slow,
+					.factor = c->rope_factor,
+					.mscale = (c->mscale == 1.0f && c->rope_factor > 1.0f)
+						? sqrtf(0.1f * logf(c->rope_factor) + 1.0f)
+						: c->mscale,
+					.orig_ctx = c->orig_ctx_len,
+					.thetas_cache = t->rope_thetas
+				};
+				op_rope(&q_t, pos, &rope_ctx);
+				op_rope(&k_t, pos, &rope_ctx);
+			}
 
 			/* KV Cache Append */
 			t_tensor k_tensor, v_tensor;

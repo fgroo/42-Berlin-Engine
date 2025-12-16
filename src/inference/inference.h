@@ -39,6 +39,7 @@ typedef struct s_layer_weights
 	t_tensor	*w1; // gate
 	t_tensor	*w2; // down
 	t_tensor	*w3; // up
+	t_bf16		*w_fused_gate_up;  // [hidden_dim*2, dim] fused w1|w3 (Phase 11)
 	t_tensor	*attention_norm;
 	t_tensor	*ffn_norm;
 }	t_layer_weights;
@@ -74,6 +75,8 @@ typedef struct s_inference_state
 	float	*batch_out;  // [batch_size x dim] - attention output
 	float	*batch_hb;   // [batch_size x hidden_dim] - FFN buffer
 	float	*batch_hb2;  // [batch_size x hidden_dim] - FFN buffer 2
+	// ========== FFN FUSION (Phase 11 v2) ==========
+	float	*hb_fused;   // [hidden_dim * 2] - fused gate+up output
 }	t_inference_state;
 
 // Maximum batch size for prefill (tune for L2 cache: 64 * 3072 * 4 = 768KB)
@@ -121,6 +124,7 @@ typedef struct s_transformer
 	t_tensor				evict_weights;
 	t_bf16					*output_weight_T;
 	float				*rope_thetas;      // Precomputed RoPE theta values [head_dim/2]
+	void				*rope_cache;       // Precomputed sin/cos tables (t_rope_cache*) [Phase 12]
 	void				*lsh_ctx;          // LSH context for sparse routing (t_lsh_ctx*)
 	void				*lsh_index;        // LSH block index (t_lsh_index*)
 	t_lsh_stats_atomic	lsh_stats;     // Thread-safe LSH diagnostics (Phase 9)

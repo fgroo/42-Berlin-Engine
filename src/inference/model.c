@@ -292,6 +292,28 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 		t->fluid_layers[i].grad_acc = calloc(adapter_size, sizeof(float));
 	}
 
+	/*
+	** Solution 4: Final Hidden Adapter [dim x dim]
+	** Applied directly to final hidden state x before output projection.
+	** This bypasses the FFN/hidden_dim mismatch issue.
+	*/
+	int final_adapter_size = t->config.dim * t->config.dim;
+	t->final_adapter = calloc(1, sizeof(t_tensor));
+	t->final_adapter->data = calloc(final_adapter_size, sizeof(t_bf16));
+	t->final_adapter->size = final_adapter_size;
+	t->final_adapter->dtype = DTYPE_BF16;
+	t->final_adapter->ndim = 2;
+	t->final_adapter->shape[0] = t->config.dim;
+	t->final_adapter->shape[1] = t->config.dim;
+	t->final_adapter_grad = calloc(final_adapter_size, sizeof(float));
+	printf("[FINAL_ADAPTER] Initialized: [%d x %d] = %d params\n",
+		t->config.dim, t->config.dim, final_adapter_size);
+
+	/* Solution 5: Logit Bias [vocab_size] - direct output layer bias */
+	t->logit_bias = calloc(t->config.vocab_size, sizeof(float));
+	printf("[LOGIT_BIAS] Initialized: [%d] = %lu bytes\n",
+		t->config.vocab_size, t->config.vocab_size * sizeof(float));
+
 	t->state.kv_cache = calloc(t->config.n_layers, sizeof(t_kv_cache));
 	t_kv_init_params kv_params = {
 		.max_seq = t->config.seq_len,

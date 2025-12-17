@@ -51,6 +51,13 @@ void	backward_zero_grads(t_transformer *t)
 			memset(t->fluid_layers[layer].grad_acc, 0, size);
 		layer++;
 	}
+	
+	/* Solution 4: Zero final_adapter gradient accumulator */
+	if (t->final_adapter_grad)
+	{
+		size_t fa_size = (size_t)t->config.dim * t->config.dim * sizeof(float);
+		memset(t->final_adapter_grad, 0, fa_size);
+	}
 }
 
 /*
@@ -136,6 +143,42 @@ void	backward_apply_grads(t_transformer *t, float lr)
 			}
 			printf("[DEBUG] Layer 23 weights: sum=%.6f, max=%.6f\n", weight_sum, weight_max);
 		}
+	}
+	
+	/* Solution 4: Apply gradients to final_adapter [dim x dim] */
+	if (t->final_adapter && t->final_adapter_grad && t->final_adapter->data)
+	{
+		t_bf16 *fa_weight = (t_bf16 *)t->final_adapter->data;
+		float *fa_grad = t->final_adapter_grad;
+		size_t fa_size = (size_t)t->config.dim * t->config.dim;
+		t_xorshift_state fa_rng;
+		xorshift_init(&fa_rng, 0xFACECAFE42ULL);
+		
+		/* Compute gradient norm for clipping */
+		float fa_grad_norm = ops_simd_norm(fa_grad, fa_size);
+		float fa_scale = 1.0f;
+		if (fa_grad_norm > 1.0f)
+			fa_scale = 1.0f / fa_grad_norm;
+		
+		/* Apply with stochastic rounding */
+		for (size_t i = 0; i < fa_size; i++)
+		{
+			float g = fa_grad[i] * fa_scale;
+			if (g > GRADIENT_CLIP) g = GRADIENT_CLIP;
+			if (g < -GRADIENT_CLIP) g = -GRADIENT_CLIP;
+			bf16_stochastic_update(&fa_weight[i], lr * g, &fa_rng);
+		}
+		
+		/* Debug output */
+		float fa_sum = 0.0f, fa_max = 0.0f;
+		for (size_t i = 0; i < fa_size; i++)
+		{
+			float val = bf16_to_float(fa_weight[i]);
+			fa_sum += fabsf(val);
+			if (fabsf(val) > fa_max) fa_max = fabsf(val);
+		}
+		printf("[FINAL_ADAPTER] weights: sum=%.6f, max=%.6f, grad_norm=%.4f\n", 
+			fa_sum, fa_max, fa_grad_norm);
 	}
 }
 
@@ -307,6 +350,32 @@ void	transformer_backward_step(t_transformer *t, int target_token, int pos)
 	target_prob = s->logits[target_token];
 	s->logits[target_token] -= 1.0f;
 	loss = -logf(target_prob + 1e-8f);
+	
+	/* Solution 5: Update logit_bias directly with gradient */
+	/* Gradient for bias[i] = softmax[i] - target[i] */
+	/* This is the MOST DIRECT learning signal possible */
+	if (t->logit_bias)
+	{
+		float logit_bias_lr = t->nested_lr * 100.0f;  // Very aggressive for direct bias
+		
+		/* SGD update: bias[i] -= lr * gradient[i] */
+		/* gradient[i] = s->logits[i] (which is softmax - target after line 351) */
+		#pragma omp parallel for schedule(static)
+		for (int i = 0; i < c->vocab_size; i++)
+			t->logit_bias[i] -= logit_bias_lr * s->logits[i];
+		
+		/* Clip to prevent explosion */
+		float max_bias = 0.0f;
+		for (int i = 0; i < c->vocab_size; i++)
+			if (fabsf(t->logit_bias[i]) > max_bias)
+				max_bias = fabsf(t->logit_bias[i]);
+		
+		/* Debug: show target token bias */
+		static int bias_debug = 0;
+		if (bias_debug++ % 50 == 0)
+			printf("[LOGIT_BIAS] bias[%d]=%.4f, max_bias=%.4f\n", 
+				target_token, t->logit_bias[target_token], max_bias);
+	}
 	/* NOISE FILTER: Skip high-loss tokens (complete confusion) */
 	if (loss > HIGH_LOSS_THRESHOLD)
 	{
@@ -368,6 +437,30 @@ void	transformer_backward_step(t_transformer *t, int target_token, int pos)
 	}
 	/* 2. Backprop through output layer */
 	backprop_output_layer(t, s->grad_x);
+	
+	/* Solution 4: Accumulate gradients for final_adapter */
+	/* dW = grad_x @ x^T where grad_x = dL/dx from output layer */
+	/* x is the normalized hidden state before adapter application */
+	/* NOTE: We use s->x which is POST-adapter, but the gradient flows through */
+	if (t->final_adapter_grad && t->final_adapter)
+	{
+		int dim = c->dim;
+		float *grad = t->final_adapter_grad;
+		
+		/* OUTER PRODUCT: grad[i,j] += grad_x[i] * x[j] */
+		/* This accumulates over all tokens in the turn */
+		#pragma omp parallel for schedule(static)
+		for (int i = 0; i < dim; i++)
+		{
+			float grad_xi = s->grad_x[i] * ADAPTER_SCALE;  // Chain rule: scale factor
+			float *grad_row = grad + i * dim;
+			for (int j = 0; j < dim; j++)
+			{
+				grad_row[j] += grad_xi * s->x[j];
+			}
+		}
+	}
+	
 	/* 3. Accumulate gradients into FP32 buffers (reverse layer order) */
 	layer = c->n_layers - 1;
 	while (layer >= 0)

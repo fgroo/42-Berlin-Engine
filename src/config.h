@@ -50,6 +50,10 @@
 #  define GRADIENT_NORM_CLIP 1.0f  // Global gradient norm clip
 # endif
 
+# ifndef ADAPTER_SCALE
+#  define ADAPTER_SCALE 500.0f  // Balanced: effective signal without explosion
+# endif
+
 # ifndef MAX_GEN_LEN
 #  define MAX_GEN_LEN 64
 # endif

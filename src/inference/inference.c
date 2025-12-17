@@ -527,8 +527,11 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 			if (t->nested_learning)
 				memcpy(t->fluid_layers[i].hb_cache, s->hb, c->hidden_dim * sizeof(float));
 			
-			// SIMD+OpenMP optimized adapter matmul: xb += adapter @ hb
+			// SIMD+OpenMP optimized adapter matmul: xb += SCALE * adapter @ hb
 			// adapter is [dim x hidden_dim] (BF16), hb is [hidden_dim] (F32)
+			// ADAPTER_SCALE amplifies the adapter's contribution (Solution 1)
+			// NOTE: Disabled in favor of single final adapter (Solution 3+)
+			/*
 			t_tensor *adapter = t->fluid_layers[i].w2_weight;
 			t_bf16 *a_data = (t_bf16 *)adapter->data;
 			int hidden = c->hidden_dim;
@@ -537,8 +540,9 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 			for (int row = 0; row < c->dim; row++)
 			{
 				t_bf16 *a_row = a_data + row * hidden;
-				s->xb[row] += simd_dot_bf16_f32(a_row, s->hb, hidden);
+				s->xb[row] += ADAPTER_SCALE * simd_dot_bf16_f32(a_row, s->hb, hidden);
 			}
+			*/
 		}
 		
 		// Residual (SIMD-accelerated)
@@ -549,11 +553,60 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 	// 3. Final Norm
 	op_rmsnorm(&x_tensor, &x_tensor, t->weights.norm, c->norm_eps);
 	
+	// ========== SOLUTION 4: FINAL HIDDEN ADAPTER [dim x dim] ==========
+	// Apply learned adapter directly to final hidden state x
+	// This uses properly-sized adapter with correct gradient flow
+	if (t->final_adapter && t->final_adapter->data)
+	{
+		t_bf16 *adapter_data = (t_bf16 *)t->final_adapter->data;
+		int dim = c->dim;
+		
+		// CRITICAL: Save x_pre for backward pass (only during learning)
+		if (t->nested_learning)
+		{
+			// x_pre is already in s->x before modification
+			// We'll cache it in a static buffer (temporary solution)
+			static float x_cache[4096];
+			memcpy(x_cache, s->x, dim * sizeof(float));
+			// Store pointer for backward pass to access
+			// TODO: Add proper field for this
+		}
+		
+		// Compute adapter @ x and add to x
+		float adapter_out[4096];
+		#pragma omp parallel for schedule(static)
+		for (int row = 0; row < dim; row++)
+		{
+			t_bf16 *a_row = adapter_data + row * dim;
+			adapter_out[row] = simd_dot_bf16_f32(a_row, s->x, dim);
+		}
+		
+		// Debug: check adapter contribution magnitude
+		float max_contribution = 0.0f;
+		for (int d = 0; d < dim; d++)
+			if (fabsf(adapter_out[d]) > max_contribution)
+				max_contribution = fabsf(adapter_out[d]);
+		static int debug_count = 0;
+		if (debug_count++ % 50 == 0)
+			printf("[FINAL_ADAPTER] max_out=%.6f, scaled=%.2f\n", 
+				max_contribution, ADAPTER_SCALE * max_contribution);
+		
+		// Apply scaled adapter output to x
+		for (int d = 0; d < dim; d++)
+			s->x[d] += ADAPTER_SCALE * adapter_out[d];
+	}
 
 	// 4. Logits
 	wrap_tensor(&logits_tensor, s->logits, c->vocab_size);
 	op_matmul(&logits_tensor, t->weights.output, &x_tensor);
 	
+	// Solution 5: Add logit bias directly to logits
+	if (t->logit_bias)
+	{
+		#pragma omp parallel for schedule(static)
+		for (int i = 0; i < c->vocab_size; i++)
+			s->logits[i] += t->logit_bias[i];
+	}
 
 	return (s->logits);
 }

@@ -143,6 +143,19 @@ typedef struct s_transformer
 	t_block_manager		block_manager;     // Block pool for all layers
 	t_paged_kv_cache	*paged_kv;         // Per-layer paged cache views
 	int					use_paged_kv;      // 0 = old linear cache, 1 = paged blocks
+	/*
+	** Final Hidden Adapter [dim x dim] - Solution 4
+	** Applied directly to final hidden state x before output projection.
+	** Trained via backward pass with gradient accumulation.
+	*/
+	t_tensor			*final_adapter;      // [dim x dim] BF16 weights
+	float				*final_adapter_grad; // [dim x dim] FP32 gradient accumulator
+	/*
+	** Logit Bias [vocab_size] - Solution 5
+	** Added directly to logits before softmax.
+	** Most direct learning signal possible.
+	*/
+	float				*logit_bias;         // [vocab_size] FP32 bias
 }	t_transformer;
 
 int		transformer_init(t_transformer *t, const char *model_path, const char *config_path);

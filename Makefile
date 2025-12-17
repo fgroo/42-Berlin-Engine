@@ -5,7 +5,7 @@ EXTRA_CFLAGS ?=
 # Reasonable LR after adapter wire fix
 FROZEN_LAYERS ?= 22
 SPARSE_K ?= 64
-NESTED_LR ?= 0.0001
+NESTED_LR ?= 0.01
 NL_MAX_STEPS ?= 40
 
 CONFIG_FLAGS = -DFROZEN_LAYERS=$(FROZEN_LAYERS) -DSPARSE_K=$(SPARSE_K) -DNESTED_LR=$(NESTED_LR)f -DNL_MAX_STEPS=$(NL_MAX_STEPS)
@@ -36,6 +36,7 @@ LIB_SRCS = $(SRC_DIR)/memory/arena.c \
       $(SRC_DIR)/compute/ops_activation.c \
       $(SRC_DIR)/compute/ops_attention.c \
       $(SRC_DIR)/compute/ops_simd.c \
+      $(SRC_DIR)/compute/ops_quant.c \
       $(SRC_DIR)/compute/gemm_kernel.c \
       $(SRC_DIR)/compute/gemm.c \
       $(SRC_DIR)/compute/sampler.c \
@@ -84,6 +85,9 @@ bench_gradient: $(LIB_OBJS) src/bench_gradient.o
 
 bench_haystack: $(LIB_OBJS) src/bench_haystack.o
 	$(CC) $(LIB_OBJS) src/bench_haystack.o -o bench_haystack -lm $(LDFLAGS)
+
+bench_haystack_32k: $(LIB_OBJS) src/bench_haystack_32k.o
+	$(CC) $(LIB_OBJS) src/bench_haystack_32k.o -o bench_haystack_32k -lm $(LDFLAGS)
 
 $(NAME): $(LIB_OBJS) main.o
 	$(CC) $(LIB_OBJS) main.o -o $(NAME) $(LDFLAGS)

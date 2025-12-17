@@ -9,3 +9,4 @@ chat
 test_tokenizer
 test_inference
 engine_test
+*.o

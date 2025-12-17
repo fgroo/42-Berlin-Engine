@@ -258,33 +258,59 @@ void	op_multihead_attention(t_attention_params *p)
 ** @param max_score: Running max (in/out)
 ** @param sum_exp: Running sum of exp (in/out)
 */
-static void	attention_block(float *out, const float *q,
+
+/* Stack buffer sizes for JIT dequantization (16KB total, fits L1) */
+#define MAX_BLOCK_SIZE 32
+#define MAX_HEAD_DIM 256
+
+/*
+** PHASE 2 DEEP FREEZE: INT8 Paged Attention Block Kernel
+** JIT-dequantizes INT8 K/V to F32 on stack, then computes attention
+** Saves 50% memory bandwidth vs BF16
+*/
+static void	attention_block_int8(float *out, const float *q,
 			t_kv_block *block, int kv_h, int head_dim, float scale,
 			float *max_score, float *sum_exp)
 {
 	int		n_tokens;
 	int		t;
-	int		offset;
+	int		data_offset;
+	int		scale_offset;
 	float	score;
 	float	prev_max;
 	float	scale_factor;
 	float	raw_exp;
-	t_bf16	*k_ptr;
-	t_bf16	*v_ptr;
+	/* Stack buffers for JIT dequantization (hot L1 cache) */
+	float	k_buf[MAX_BLOCK_SIZE * MAX_HEAD_DIM] __attribute__((aligned(32)));
+	float	v_buf[MAX_BLOCK_SIZE * MAX_HEAD_DIM] __attribute__((aligned(32)));
 
 	n_tokens = block->n_tokens;
 	if (n_tokens <= 0)
 		return ;
+	
 	/* Block layout: [kv_head][token][dim] */
-	/* Offset to this head's data: kv_h * BLOCK_SIZE * head_dim */
-	offset = kv_h * KV_BLOCK_SIZE * head_dim;
+	/* Data offset to this head: kv_h * BLOCK_SIZE * head_dim */
+	data_offset = kv_h * KV_BLOCK_SIZE * head_dim;
+	/* Scale offset: kv_h * BLOCK_SIZE */
+	scale_offset = kv_h * KV_BLOCK_SIZE;
+	
+	/* JIT-Dequantize entire block K/V for this head (trades compute for bandwidth) */
+	simd_dequant_block_int8_f32(k_buf, 
+		block->k_quant + data_offset,
+		block->k_scales + scale_offset,
+		n_tokens, head_dim);
+	simd_dequant_block_int8_f32(v_buf,
+		block->v_quant + data_offset,
+		block->v_scales + scale_offset,
+		n_tokens, head_dim);
+	
+	/* Online softmax attention with F32 buffers */
 	t = 0;
 	while (t < n_tokens)
 	{
-		k_ptr = block->k + offset + t * head_dim;
-		v_ptr = block->v + offset + t * head_dim;
-		/* Compute Q · K_t */
-		score = simd_dot_bf16_f32(k_ptr, q, head_dim) * scale;
+		/* Compute Q · K_t (F32 × F32 = more precise than BF16) */
+		score = simd_dot_f32_f32(q, k_buf + t * head_dim, head_dim) * scale;
+		
 		/* Online softmax update */
 		prev_max = *max_score;
 		if (score > prev_max)
@@ -292,8 +318,10 @@ static void	attention_block(float *out, const float *q,
 		scale_factor = fast_expf(prev_max - *max_score);
 		raw_exp = fast_expf(score - *max_score);
 		*sum_exp = (*sum_exp) * scale_factor + raw_exp;
-		/* Fused rescale + FMA */
-		simd_rescale_fma_bf16(out, scale_factor, v_ptr, raw_exp, head_dim);
+		
+		/* Rescale and accumulate: out = out * scale_factor + V * raw_exp */
+		simd_scale_f32(out, scale_factor, head_dim);
+		simd_fma_f32(out, v_buf + t * head_dim, raw_exp, head_dim);
 		t++;
 	}
 }
@@ -324,7 +352,7 @@ static void	attention_head_paged(float *out, const float *q,
 		phys_idx = bm->page_table[page_base + block_idx];
 		if (phys_idx >= 0)
 		{
-			attention_block(out, q, &bm->blocks[phys_idx],
+			attention_block_int8(out, q, &bm->blocks[phys_idx],
 				kv_h, head_dim, scale, &max_score, &sum_exp);
 		}
 		block_idx++;
@@ -357,7 +385,7 @@ static void	attention_head_paged_sparse(float *out, const float *q,
 		phys_idx = selected_blocks[i];
 		if (phys_idx >= 0)
 		{
-			attention_block(out, q, &bm->blocks[phys_idx],
+			attention_block_int8(out, q, &bm->blocks[phys_idx],
 				kv_h, head_dim, scale, &max_score, &sum_exp);
 		}
 		i++;

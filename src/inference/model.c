@@ -1,7 +1,8 @@
 #include "inference.h"
 #include "../config.h"
 #include "compute/ops_lsh.h"
-#include "compute/ops_rope.h"  /* Phase 12: Precomputed sin/cos tables */
+#include "compute/ops_rope.h"   /* Phase 12: Precomputed sin/cos tables */
+#include "compute/ops_quant.h"  /* Phase 2: FP8/INT8 quantization */
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -419,8 +420,16 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 		else
 		{
 			t->rope_cache = NULL;
-			printf("[RoPE CACHE] WARN: Init failed, falling back to per-token trig.\n");
+			printf("[RoPE CACHE] Failed to init, using fallback.\n");
 		}
+	}
+
+	// ========== FP8 QUANTIZATION (Phase 2 Deep Freeze) ==========
+	// Initialize FP8 E4M3 lookup table for Lightning Indexer
+	// 256 entries = 1KB, fits in L1 cache for zero-cost FP8->FP32
+	{
+		quant_init_fp8_lut();
+		printf("[FP8 LUT] Initialized (256 entries, 1KB). Quantization ready.\n");
 	}
 
 	// ========== LSH LIGHTNING INDEXER INIT ==========

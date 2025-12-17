@@ -42,12 +42,25 @@
 
 /*
 ** Single KV block - holds BLOCK_SIZE consecutive tokens for one layer
+** 
+** PHASE 2 DEEP FREEZE: INT8 Quantized Storage
+** - 2x memory reduction vs BF16
+** - Per-token scaling for precision preservation
+** - JIT dequantization on attention read
+**
 ** Layout: [n_kv_heads][BLOCK_SIZE][head_dim] - Head-first for SIMD per-head access
 */
 typedef struct s_kv_block
 {
-	t_bf16		*k;				/* [n_kv_heads * BLOCK_SIZE * head_dim] */
-	t_bf16		*v;				/* [n_kv_heads * BLOCK_SIZE * head_dim] */
+	/* INT8 Quantized Storage (2x smaller than BF16) */
+	int8_t		*k_quant;		/* [n_kv_heads * BLOCK_SIZE * head_dim] */
+	int8_t		*v_quant;		/* [n_kv_heads * BLOCK_SIZE * head_dim] */
+	
+	/* Per-token scaling factors for dequantization: x_real = x_quant * scale */
+	float		*k_scales;		/* [n_kv_heads * BLOCK_SIZE] */
+	float		*v_scales;		/* [n_kv_heads * BLOCK_SIZE] */
+	
+	/* Routing metadata (kept in FP32 for indexer precision) */
 	float		*centroid;		/* Mean key vector for LSH [head_dim] */
 	int			n_tokens;		/* How many tokens in this block (0-BLOCK_SIZE) */
 	int			start_pos;		/* First token position in this block */
@@ -131,15 +144,17 @@ void	paged_kv_append(t_paged_kv_cache *pkv, const float *k, const float *v,
 			int pos);
 
 /*
-** Get pointer to K/V for a specific position
+** Get pointer to K/V for a specific position (INT8 quantized)
 ** @param pkv: Paged KV cache
 ** @param pos: Token position
 ** @param kv_head: Which KV head
-** @param out_k: Output pointer to K data
-** @param out_v: Output pointer to V data
+** @param out_k: Output pointer to INT8 K data
+** @param out_v: Output pointer to INT8 V data
+** @param out_k_scale: Output K dequantization scale
+** @param out_v_scale: Output V dequantization scale
 */
-void	paged_kv_get(t_paged_kv_cache *pkv, int pos, int kv_head,
-			t_bf16 **out_k, t_bf16 **out_v);
+void	paged_kv_get_int8(t_paged_kv_cache *pkv, int pos, int kv_head,
+			int8_t **out_k, int8_t **out_v, float *out_k_scale, float *out_v_scale);
 
 /*
 ** Reset cache for a layer (start fresh context)
@@ -153,12 +168,14 @@ void	paged_kv_reset(t_paged_kv_cache *pkv);
 */
 
 /*
-** Calculate block centroid (mean of all key vectors in block)
+** Calculate block centroid (mean of all key vectors in block) - INT8 version
+** Dequantizes INT8 keys and computes mean for sparse routing
 ** Called when block is full (n_tokens == BLOCK_SIZE)
 ** @param block: Block to calculate centroid for
 ** @param head_dim: Dimension per head (uses first KV head)
+** @param n_kv_heads: Number of KV heads (for layout calculation)
 */
-void	calc_block_centroid(t_kv_block *block, int head_dim);
+void	calc_block_centroid_int8(t_kv_block *block, int head_dim, int n_kv_heads);
 
 /*
 ** ============================================================================

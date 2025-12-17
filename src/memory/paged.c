@@ -12,11 +12,13 @@
 
 #include "paged.h"
 #include "compute/ops_heap.h"
+#include "compute/ops_quant.h"    /* INT8/FP8 quantization (Phase 2 Deep Freeze) */
 #include "compute/simd_kernels.h"  /* simd_dot_f32_f32 for block scoring */
 #include "../safe_alloc.h"  /* xmalloc/xcalloc for safe allocation (Phase 9) */
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 
 /*
 ** ============================================================================
@@ -28,7 +30,8 @@ int	block_manager_init(t_block_manager *bm, int n_layers, int n_kv_heads,
 			int head_dim, int max_blocks_per_layer)
 {
 	int		total_blocks;
-	int		block_size_bytes;
+	int		int8_block_size;
+	int		scales_size;
 	int		i;
 
 	bm->n_layers = n_layers;
@@ -52,24 +55,33 @@ int	block_manager_init(t_block_manager *bm, int n_layers, int n_kv_heads,
 		return (-1);
 	}
 	
-	/* Size of K or V per block: [n_kv_heads * BLOCK_SIZE * head_dim] */
-	block_size_bytes = n_kv_heads * KV_BLOCK_SIZE * head_dim * sizeof(t_bf16);
+	/* PHASE 2 DEEP FREEZE: INT8 Storage (2x smaller than BF16) */
+	/* INT8 K/V: [n_kv_heads * BLOCK_SIZE * head_dim] bytes */
+	int8_block_size = n_kv_heads * KV_BLOCK_SIZE * head_dim * sizeof(int8_t);
+	/* Scales: [n_kv_heads * BLOCK_SIZE] floats (one per token per head) */
+	scales_size = n_kv_heads * KV_BLOCK_SIZE * sizeof(float);
 	
-	/* Allocate K/V storage for each block */
+	/* Allocate INT8 K/V storage + scales for each block */
 	i = 0;
 	while (i < total_blocks)
 	{
-		bm->blocks[i].k = malloc(block_size_bytes);
-		bm->blocks[i].v = malloc(block_size_bytes);
+		/* Aligned allocation for AVX2 (32-byte aligned) */
+		bm->blocks[i].k_quant = aligned_alloc(32, int8_block_size);
+		bm->blocks[i].v_quant = aligned_alloc(32, int8_block_size);
+		bm->blocks[i].k_scales = malloc(scales_size);
+		bm->blocks[i].v_scales = malloc(scales_size);
 		bm->blocks[i].centroid = calloc(head_dim, sizeof(float));
-		if (!bm->blocks[i].k || !bm->blocks[i].v || !bm->blocks[i].centroid)
+		
+		if (!bm->blocks[i].k_quant || !bm->blocks[i].v_quant ||
+			!bm->blocks[i].k_scales || !bm->blocks[i].v_scales ||
+			!bm->blocks[i].centroid)
 		{
 			fprintf(stderr, "[PagedKV] ERROR: Failed to allocate block %d\n", i);
 			block_manager_free(bm);
 			return (-1);
 		}
-		memset(bm->blocks[i].k, 0, block_size_bytes);
-		memset(bm->blocks[i].v, 0, block_size_bytes);
+		memset(bm->blocks[i].k_quant, 0, int8_block_size);
+		memset(bm->blocks[i].v_quant, 0, int8_block_size);
 		bm->blocks[i].n_tokens = 0;
 		bm->blocks[i].start_pos = -1;
 		bm->blocks[i].layer_idx = -1;
@@ -129,8 +141,10 @@ void	block_manager_free(t_block_manager *bm)
 		i = 0;
 		while (i < bm->capacity)
 		{
-			free(bm->blocks[i].k);
-			free(bm->blocks[i].v);
+			free(bm->blocks[i].k_quant);
+			free(bm->blocks[i].v_quant);
+			free(bm->blocks[i].k_scales);
+			free(bm->blocks[i].v_scales);
 			free(bm->blocks[i].centroid);
 			i++;
 		}
@@ -217,20 +231,24 @@ void	paged_kv_append(t_paged_kv_cache *pkv, const float *k, const float *v,
 	phys_idx = bm->page_table[page_table_base + block_idx];
 	block = &bm->blocks[phys_idx];
 	
-	/* Write K/V into block at offset */
+	/* PHASE 2 DEEP FREEZE: INT8 Quantizing Store */
 	/* Layout: [kv_head][token_in_block][dim] */
 	kv_size = bm->head_dim;
 	h = 0;
 	while (h < bm->n_kv_heads)
 	{
-		/* Destination offset: h * BLOCK_SIZE * head_dim + offset * head_dim */
-		int dest_offset = h * KV_BLOCK_SIZE * kv_size + offset_in_block * kv_size;
+		/* Destination offset in INT8 buffer: h * BLOCK_SIZE * head_dim + offset * head_dim */
+		int data_offset = h * KV_BLOCK_SIZE * kv_size + offset_in_block * kv_size;
+		/* Scale index: h * BLOCK_SIZE + offset_in_block */
+		int scale_idx = h * KV_BLOCK_SIZE + offset_in_block;
 		/* Source offset: h * head_dim */
 		int src_offset = h * kv_size;
 		
-		/* SIMD F32 → BF16 conversion (~8x faster than scalar) */
-		simd_f32_to_bf16(block->k + dest_offset, k + src_offset, kv_size);
-		simd_f32_to_bf16(block->v + dest_offset, v + src_offset, kv_size);
+		/* Quantize F32 -> INT8 with dynamic scaling, store scale for dequantization */
+		block->k_scales[scale_idx] = quant_f32_to_int8(
+			block->k_quant + data_offset, k + src_offset, kv_size);
+		block->v_scales[scale_idx] = quant_f32_to_int8(
+			block->v_quant + data_offset, v + src_offset, kv_size);
 		h++;
 	}
 	
@@ -239,15 +257,16 @@ void	paged_kv_append(t_paged_kv_cache *pkv, const float *k, const float *v,
 	pkv->n_tokens = pos + 1;
 	
 	/* Calculate centroid when block is full (for sparse routing) */
+	/* Note: calc_block_centroid needs to dequantize INT8 now */
 	if (block->n_tokens == KV_BLOCK_SIZE && !block->lsh_registered)
 	{
-		calc_block_centroid(block, bm->head_dim);
+		calc_block_centroid_int8(block, bm->head_dim, bm->n_kv_heads);
 		block->lsh_registered = 1;
 	}
 }
 
-void	paged_kv_get(t_paged_kv_cache *pkv, int pos, int kv_head,
-			t_bf16 **out_k, t_bf16 **out_v)
+void	paged_kv_get_int8(t_paged_kv_cache *pkv, int pos, int kv_head,
+			int8_t **out_k, int8_t **out_v, float *out_k_scale, float *out_v_scale)
 {
 	t_block_manager	*bm;
 	int				block_idx;
@@ -255,6 +274,7 @@ void	paged_kv_get(t_paged_kv_cache *pkv, int pos, int kv_head,
 	int				phys_idx;
 	int				page_table_base;
 	int				data_offset;
+	int				scale_idx;
 
 	bm = pkv->bm;
 	block_idx = pos / KV_BLOCK_SIZE;
@@ -266,15 +286,21 @@ void	paged_kv_get(t_paged_kv_cache *pkv, int pos, int kv_head,
 	{
 		*out_k = NULL;
 		*out_v = NULL;
+		*out_k_scale = 0.0f;
+		*out_v_scale = 0.0f;
 		return ;
 	}
 	
-	/* Offset: [kv_head][token_in_block][0] */
+	/* Data offset: [kv_head][token_in_block][dim] */
 	data_offset = kv_head * KV_BLOCK_SIZE * bm->head_dim + 
 				  offset_in_block * bm->head_dim;
+	/* Scale index: [kv_head][token_in_block] */
+	scale_idx = kv_head * KV_BLOCK_SIZE + offset_in_block;
 	
-	*out_k = &bm->blocks[phys_idx].k[data_offset];
-	*out_v = &bm->blocks[phys_idx].v[data_offset];
+	*out_k = &bm->blocks[phys_idx].k_quant[data_offset];
+	*out_v = &bm->blocks[phys_idx].v_quant[data_offset];
+	*out_k_scale = bm->blocks[phys_idx].k_scales[scale_idx];
+	*out_v_scale = bm->blocks[phys_idx].v_scales[scale_idx];
 }
 
 void	paged_kv_reset(t_paged_kv_cache *pkv)
@@ -309,16 +335,27 @@ void	paged_kv_reset(t_paged_kv_cache *pkv)
 ** ============================================================================
 */
 
-void	calc_block_centroid(t_kv_block *block, int head_dim)
+/* NOTE: Old BF16 calc_block_centroid removed - replaced by calc_block_centroid_int8 */
+
+/*
+** PHASE 2 DEEP FREEZE: INT8 Block Centroid Calculation
+** Dequantizes INT8 keys using per-token scales, then computes mean
+*/
+void	calc_block_centroid_int8(t_kv_block *block, int head_dim, int n_kv_heads)
 {
 	int		t;
 	int		d;
 	float	inv_n;
-	t_bf16	*k_ptr;
-	float	temp[256];  /* Stack buffer for BF16→F32 conversion */
+	float	temp[256];  /* Stack buffer for dequantized keys */
+	int8_t	*k_ptr;
+	float	scale;
+	int		scale_idx;
 
+	(void)n_kv_heads;  /* Use head 0 for centroid */
+	
 	if (block->n_tokens <= 0)
 		return ;
+	
 	/* Zero the centroid */
 	d = 0;
 	while (d < head_dim)
@@ -326,19 +363,25 @@ void	calc_block_centroid(t_kv_block *block, int head_dim)
 		block->centroid[d] = 0.0f;
 		d++;
 	}
-	/* Sum all keys (from first KV head only - they share representation) */
-	/* Block layout: [kv_head][token][dim] - we use head 0 */
-	/* SIMD path: convert BF16→F32 then accumulate */
+	
+	/* Sum all keys (from first KV head only) */
+	/* Block layout: [kv_head][token][dim] - head 0 at offset 0 */
 	t = 0;
 	while (t < block->n_tokens)
 	{
-		k_ptr = block->k + t * head_dim;  /* head 0 at offset 0 */
-		/* Convert BF16 keys to F32 temp buffer, then add to centroid */
-		simd_bf16_to_f32(temp, k_ptr, head_dim);
+		k_ptr = block->k_quant + t * head_dim;  /* head 0 */
+		scale_idx = t;  /* head 0 * BLOCK_SIZE + t = t */
+		scale = block->k_scales[scale_idx];
+		
+		/* Dequantize INT8 -> F32 using AVX2 */
+		dequant_int8_to_f32_avx2(temp, k_ptr, scale, head_dim);
+		
+		/* Accumulate */
 		simd_add_f32(block->centroid, temp, head_dim);
 		t++;
 	}
-	/* Divide by n_tokens to get mean (SIMD scale) */
+	
+	/* Divide by n_tokens to get mean */
 	inv_n = 1.0f / (float)block->n_tokens;
 	simd_scale_f32(block->centroid, inv_n, head_dim);
 }

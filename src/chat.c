@@ -13,6 +13,7 @@
 #include "inference/inference.h"
 #include "tokenizer/tokenizer.h"
 #include "compute/sampler.h"
+#include "memory/paged.h"
 #include "config.h"
 #include "engine_context.h"
 #include "safe_alloc.h"
@@ -328,19 +329,10 @@ static int	run_generation(t_transformer *t, t_tokenizer *tok,
 	}
 	else
 	{
-		// Batched prefill (GEMM path) - Phase 2.2a
-		// Process tokens in chunks of MAX_PREFILL_BATCH for GEMM efficiency
-		int chunk_start = 0;
-		int n_prefill = n_tokens - 1;
-		while (chunk_start < n_prefill)
-		{
-			int chunk_size = n_prefill - chunk_start;
-			if (chunk_size > MAX_PREFILL_BATCH)
-				chunk_size = MAX_PREFILL_BATCH;
-			forward_prefill_batch(t, tokens + chunk_start, chunk_size,
-				ctx->session_pos + chunk_start);
-			chunk_start += chunk_size;
-		}
+		// Sequential prefill (same as learning, but without backward)
+		// forward_prefill_batch has bugs, using proven path instead
+		for (i = 0; i < n_tokens - 1; i++)
+			transformer_forward(t, tokens[i], ctx->session_pos + i);
 	}
 
 	next_token = tokens[n_tokens - 1];
@@ -550,7 +542,14 @@ int	main(int argc, char **argv)
 			ctx_reset_conversation(&ctx);
 			for (int l = 0; l < t.config.n_layers; l++)
 				t.state.kv_cache[l].current_seq_len = 0;
-			printf("[MODE] Conversation RESET.\n");
+			// Reset paged KV cache if using paged mode
+			if (t.use_paged_kv && t.paged_kv)
+			{
+				for (int l = 0; l < t.config.n_layers; l++)
+					paged_kv_reset(&t.paged_kv[l]);
+			}
+			// Note: Fluid weights are NOT reset here to preserve persist mode learning
+			printf("[MODE] Conversation and KV Cache RESET. Fluid weights preserved.\n");
 			continue ;
 		}
 		if (strcmp(input, "raw") == 0)

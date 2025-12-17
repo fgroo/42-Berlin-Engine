@@ -425,4 +425,106 @@ static inline void	simd_bf16_to_f32(float *dst, const uint16_t *src, int n)
 	}
 }
 
+/*
+** ============================================================================
+** PHASE 2 DEEP FREEZE: INT8 JIT-DEQUANTIZATION KERNELS
+** ============================================================================
+** On-stack dequantization for INT8 KV cache blocks.
+** Trade compute (cheap) for memory bandwidth (expensive).
+** 
+** Cost: ~1-3 cycles per conversion
+** Savings: 50% memory bandwidth (1 byte vs 2 bytes)
+** ============================================================================
+*/
+
+/*
+** Dequantize a block of INT8 values to F32
+** @param dst: Output F32 buffer [n * dim]
+** @param src: Input INT8 buffer [n * dim]
+** @param scales: Per-token scaling factors [n]
+** @param n: Number of tokens in block
+** @param dim: Dimension per token (head_dim)
+*/
+static inline void	simd_dequant_block_int8_f32(float *dst, const int8_t *src,
+					const float *scales, int n, int dim)
+{
+	int			t;
+	int			d;
+	const int8_t	*src_row;
+	float			*dst_row;
+# if SIMD_ENABLED
+	__m256		v_scale;
+	__m128i		v_i8;
+	__m256i		v_i32;
+	__m256		v_f32;
+# endif
+
+	t = 0;
+	while (t < n)
+	{
+		src_row = src + t * dim;
+		dst_row = dst + t * dim;
+# if SIMD_ENABLED
+		v_scale = _mm256_set1_ps(scales[t]);
+		d = 0;
+		/* Process 8 INT8 values per iteration */
+		while (d + 7 < dim)
+		{
+			/* Load 8 bytes (64-bit) */
+			v_i8 = _mm_loadl_epi64((__m128i const *)(src_row + d));
+			/* Sign-extend INT8 → INT32 */
+			v_i32 = _mm256_cvtepi8_epi32(v_i8);
+			/* Convert INT32 → F32 */
+			v_f32 = _mm256_cvtepi32_ps(v_i32);
+			/* Scale: real = quant * scale */
+			v_f32 = _mm256_mul_ps(v_f32, v_scale);
+			/* Store */
+			_mm256_storeu_ps(dst_row + d, v_f32);
+			d += 8;
+		}
+# else
+		d = 0;
+# endif
+		/* Scalar remainder */
+		while (d < dim)
+		{
+			dst_row[d] = (float)src_row[d] * scales[t];
+			d++;
+		}
+		t++;
+	}
+}
+
+/*
+** FMA for F32 vectors: out += scale * vec
+** Used for weighted sum aggregation in attention
+*/
+static inline void	simd_fma_f32(float *out, const float *vec, float scale, int n)
+{
+	int	i;
+# if SIMD_ENABLED
+	__m256	v_scale;
+	__m256	v_out;
+	__m256	v_vec;
+
+	v_scale = _mm256_set1_ps(scale);
+	i = 0;
+	while (i + 7 < n)
+	{
+		v_out = _mm256_loadu_ps(out + i);
+		v_vec = _mm256_loadu_ps(vec + i);
+		v_out = _mm256_fmadd_ps(v_scale, v_vec, v_out);
+		_mm256_storeu_ps(out + i, v_out);
+		i += 8;
+	}
+# else
+	i = 0;
+# endif
+	while (i < n)
+	{
+		out[i] += scale * vec[i];
+		i++;
+	}
+}
+
 #endif

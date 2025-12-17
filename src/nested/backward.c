@@ -118,6 +118,25 @@ void	backward_apply_grads(t_transformer *t, float lr)
 		}
 		layer--;
 	}
+	/* DEBUG: Print weight statistics after gradient application */
+	{
+		float weight_sum = 0.0f;
+		float weight_max = 0.0f;
+		int layer_23 = 23;  /* Check layer 23 as sample */
+		if (layer_23 < t->config.n_layers && t->fluid_layers[layer_23].w2_weight)
+		{
+			t_bf16 *w = (t_bf16 *)t->fluid_layers[layer_23].w2_weight->data;
+			size_t sz = (size_t)t->config.dim * t->config.hidden_dim;
+			for (size_t i = 0; i < sz; i++)
+			{
+				float val = bf16_to_float(w[i]);
+				weight_sum += fabsf(val);
+				if (fabsf(val) > weight_max)
+					weight_max = fabsf(val);
+			}
+			printf("[DEBUG] Layer 23 weights: sum=%.6f, max=%.6f\n", weight_sum, weight_max);
+		}
+	}
 }
 
 /*

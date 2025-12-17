@@ -73,8 +73,12 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 	uint16_t *emb_data = (uint16_t *)emb->data;
 	uint16_t *token_vec = emb_data + token * c->dim;
 	
-	// BF16 to F32 conversion (SIMD-accelerated: 8 elements per iteration)
-	simd_bf16_to_f32(s->x, token_vec, c->dim);
+	// BF16 to F32 conversion (scalar - SIMD version has bug)
+	for (int i = 0; i < c->dim; i++)
+	{
+		uint32_t val = (uint32_t)token_vec[i] << 16;
+		memcpy(&s->x[i], &val, sizeof(float));
+	}
 	
 	// DEBUG: Embedding check (disabled)
 	// if (pos == 0) {
@@ -957,6 +961,16 @@ void	forward_prefill_batch(t_transformer *t, const int *tokens,
 			for (idx2 = 0; idx2 < total_elem2; idx2++)
 				s->batch_x[idx2] += s->batch_xb[idx2];
 		}
+	}
+
+	/*
+	** CRITICAL: Copy final token state back to s->x for generation phase
+	** Without this, transformer_forward() starts with garbage state!
+	*/
+	if (batch_size > 0)
+	{
+		int last_token_idx = batch_size - 1;
+		memcpy(s->x, s->batch_x + last_token_idx * dim, dim * sizeof(float));
 	}
 }
 

@@ -63,8 +63,9 @@
 # endif
 
 // Number of blocks to attend to in sparse paged mode
+// At 64 blocks, we get ~25% coverage which improves needle retrieval
 # ifndef SPARSE_BLOCKS_K
-#  define SPARSE_BLOCKS_K 32
+#  define SPARSE_BLOCKS_K 64
 # endif
 
 // Sliding window for hybrid attention - always attend to last W tokens

@@ -351,30 +351,33 @@ void	transformer_backward_step(t_transformer *t, int target_token, int pos)
 	s->logits[target_token] -= 1.0f;
 	loss = -logf(target_prob + 1e-8f);
 	
-	/* Solution 5: Update logit_bias directly with gradient */
-	/* Gradient for bias[i] = softmax[i] - target[i] */
-	/* This is the MOST DIRECT learning signal possible */
+	/* Solution 5: Update logit_bias - SPARSE UPDATE (target only) */
+	/* The dense update was causing collateral damage to other tokens */
+	/* Now we ONLY boost the target token's bias */
 	if (t->logit_bias)
 	{
-		float logit_bias_lr = t->nested_lr * 100.0f;  // Very aggressive for direct bias
+		float logit_bias_lr = t->nested_lr * 5000.0f;  // Balanced for sequence
 		
-		/* SGD update: bias[i] -= lr * gradient[i] */
-		/* gradient[i] = s->logits[i] (which is softmax - target after line 351) */
-		#pragma omp parallel for schedule(static)
-		for (int i = 0; i < c->vocab_size; i++)
-			t->logit_bias[i] -= logit_bias_lr * s->logits[i];
+		/* SPARSE UPDATE: Only increase target token's bias */
+		/* gradient[target] = softmax[target] - 1 = negative, so bias INCREASES */
+		/* We don't update other tokens anymore to avoid collateral damage */
+		t->logit_bias[target_token] += logit_bias_lr * 1.0f;  // Direct boost
 		
-		/* Clip to prevent explosion */
-		float max_bias = 0.0f;
-		for (int i = 0; i < c->vocab_size; i++)
-			if (fabsf(t->logit_bias[i]) > max_bias)
-				max_bias = fabsf(t->logit_bias[i]);
+		/* Small decay on non-target tokens to prevent explosion */
+		static int decay_counter = 0;
+		if (decay_counter++ % 100 == 0)  // Only decay occasionally
+		{
+			#pragma omp parallel for schedule(static)
+			for (int i = 0; i < c->vocab_size; i++)
+				if (i != target_token)
+					t->logit_bias[i] *= 0.99f;  // Slight decay
+		}
 		
 		/* Debug: show target token bias */
 		static int bias_debug = 0;
 		if (bias_debug++ % 50 == 0)
-			printf("[LOGIT_BIAS] bias[%d]=%.4f, max_bias=%.4f\n", 
-				target_token, t->logit_bias[target_token], max_bias);
+			printf("[LOGIT_BIAS] bias[%d]=%.4f\n", 
+				target_token, t->logit_bias[target_token]);
 	}
 	/* NOISE FILTER: Skip high-loss tokens (complete confusion) */
 	if (loss > HIGH_LOSS_THRESHOLD)

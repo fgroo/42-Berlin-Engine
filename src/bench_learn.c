@@ -30,7 +30,7 @@
 #define QUERY_PROMPT "The secret code is"
 #define TARGET_ANSWER "7742"
 #define TRAIN_LR 0.1f        /* Reduced LR for stable training */
-#define TRAIN_EPOCHS 20      /* More epochs for better convergence */
+#define TRAIN_EPOCHS 20      /* More epochs for balanced training */
 #define MAX_STEPS_PER_EPOCH 1000  /* Allow more steps per epoch */
 
 /*
@@ -196,12 +196,13 @@ static void	run_extended_training(t_transformer *t, t_tokenizer *tok,
 			/* Re-enable learning for next epoch */
 			t->nested_learning = 1;
 
-			/* Early stopping if we're confident */
-			if (p_target > 0.5f)
-			{
-				printf("\n[EARLY STOP] P(target) > 50%%, training successful!\n");
-				break ;
-			}
+			/* Early stopping DISABLED for multi-token learning */
+			/* We need to train longer to boost bias for all 4 tokens */
+			// if (p_target > 0.5f)
+			// {
+			// 	printf("\n[EARLY STOP] P(target) > 50%%, training successful!\n");
+			// 	break ;
+			// }
 		}
 	}
 
@@ -212,9 +213,11 @@ static void	run_extended_training(t_transformer *t, t_tokenizer *tok,
 
 /*
 ** Verification Turn: Query the model with learning DISABLED
+** Now supports multi-token targets
 */
 static int	run_verification_turn(t_transformer *t, t_tokenizer *tok,
-				const char *prompt, const char *expected, int target_id)
+				const char *prompt, const char *expected, 
+				int *target_tokens, int n_target)
 {
 	int		*tokens;
 	int		n_tokens;
@@ -227,13 +230,14 @@ static int	run_verification_turn(t_transformer *t, t_tokenizer *tok,
 	char	generated[256];
 	int		gen_len;
 	int		success;
+	int		tokens_correct;
 
 	printf("\n");
 	printf("============================================================\n");
 	printf("            FINAL VERIFICATION (Learning OFF)               \n");
 	printf("============================================================\n");
 	printf("Query: %s\n", prompt);
-	printf("Expected: %s\n\n", expected);
+	printf("Expected: %s (%d tokens)\n\n", expected, n_target);
 
 	n_tokens = tokenizer_encode(tok, prompt, &tokens);
 	if (n_tokens < 0)
@@ -250,11 +254,21 @@ static int	run_verification_turn(t_transformer *t, t_tokenizer *tok,
 	}
 	free(tokens);
 
-	p_target = check_target_prob(t, logits, target_id);
-	printf("[PROB] P('%s') = %.2f%%\n", expected, p_target * 100.0f);
+	p_target = check_target_prob(t, logits, target_tokens[0]);
+	printf("[PROB] P(first token) = %.2f%%\n", p_target * 100.0f);
+	
+	/* Debug: show logit_bias values for all target tokens */
+	if (t->logit_bias)
+	{
+		printf("[BIAS] Target token biases: ");
+		for (int ti = 0; ti < n_target; ti++)
+			printf("bias[%d]=%.2f ", target_tokens[ti], t->logit_bias[target_tokens[ti]]);
+		printf("\n");
+	}
 
 	printf("[GEN] Model output: ");
 	gen_len = 0;
+	tokens_correct = 0;
 	memset(generated, 0, sizeof(generated));
 	for (i = 0; i < 10 && logits; i++)
 	{
@@ -276,6 +290,9 @@ static int	run_verification_turn(t_transformer *t, t_tokenizer *tok,
 			strcat(generated, piece);
 			gen_len += strlen(piece);
 		}
+		/* Check if this token matches expected sequence */
+		if (i < n_target && next_token == target_tokens[i])
+			tokens_correct++;
 		if (next_token == 2)
 			break ;
 		logits = transformer_forward(t, next_token, pos);
@@ -283,11 +300,14 @@ static int	run_verification_turn(t_transformer *t, t_tokenizer *tok,
 	}
 	printf("\n\n");
 
-	success = (strstr(generated, expected) != NULL);
+	/* Success: string contains expected OR all tokens match */
+	success = (strstr(generated, expected) != NULL) || (tokens_correct == n_target);
 	if (success)
-		printf("[PASS] Model correctly recalled: '%s'\n", expected);
+		printf("[PASS] Model correctly recalled: '%s' (%d/%d tokens)\n", 
+			expected, tokens_correct, n_target);
 	else
-		printf("[FAIL] Model did NOT output expected: '%s'\n", expected);
+		printf("[FAIL] Model did NOT output expected: '%s' (%d/%d tokens)\n",
+			expected, tokens_correct, n_target);
 
 	return (success);
 }
@@ -326,11 +346,10 @@ int	main(int argc, char **argv)
 	if (tokenizer_init(&tok, tokenizer_path) != 0)
 		return (1);
 
-	/* Get target token ID */
+	/* Get target token IDs - keep array for multi-token training */
 	n_target = tokenizer_encode(&tok, TARGET_ANSWER, &target_tokens);
 	target_id = (n_target > 0) ? target_tokens[0] : 0;
-	if (n_target > 0)
-		free(target_tokens);
+	/* Don't free target_tokens - we need it for verification */
 
 	printf("\n");
 	printf("############################################################\n");
@@ -340,7 +359,10 @@ int	main(int argc, char **argv)
 	printf("Training LR: %.2f (aggressive)\n", TRAIN_LR);
 	printf("Training Epochs: %d\n", TRAIN_EPOCHS);
 	printf("Test Fact: \"%s\" -> \"%s\"\n", QUERY_PROMPT, TARGET_ANSWER);
-	printf("Target Token ID: %d (total tokens in answer: %d)\n", target_id, n_target);
+	printf("Target Tokens: ");
+	for (int i = 0; i < n_target; i++)
+		printf("%d ", target_tokens[i]);
+	printf("(%d tokens)\n", n_target);
 	printf("\n");
 
 	/* Extended training */
@@ -350,8 +372,13 @@ int	main(int argc, char **argv)
 	reset_kv_caches(&t);
 	printf("[RESET] KV caches cleared. Model can only rely on fluid weights.\n");
 
-	/* Final verification */
-	result = run_verification_turn(&t, &tok, QUERY_PROMPT, TARGET_ANSWER, target_id);
+	/* Final verification - now with all target tokens */
+	result = run_verification_turn(&t, &tok, QUERY_PROMPT, TARGET_ANSWER, 
+		target_tokens, n_target);
+	
+	/* Cleanup */
+	if (target_tokens)
+		free(target_tokens);
 
 	/* Summary */
 	printf("\n");

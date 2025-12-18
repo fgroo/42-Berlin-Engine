@@ -26,12 +26,14 @@
 ** Benchmark Configuration - EXTENDED TRAINING
 ** High LR and multiple epochs to really hammer the fact into the weights
 */
-#define TEACH_PROMPT "Remember: The secret code is 7742. The secret code is 7742. The secret code is 7742. The secret code is 7742. The secret code is 7742."
+#define TEACH_PROMPT "The secret code is 7742. The secret code is 7742. The secret code is 7742. The secret code is 7742. The secret code is 7742."
 #define QUERY_PROMPT "The secret code is"
 #define TARGET_ANSWER "7742"
 #define TRAIN_LR 0.1f        /* Reduced LR for stable training */
-#define TRAIN_EPOCHS 20      /* More epochs for balanced training */
+#define TRAIN_EPOCHS 5       /* Quick test for context-aware bias */
 #define MAX_STEPS_PER_EPOCH 1000  /* Allow more steps per epoch */
+
+
 
 /*
 ** Reset KV caches (both standard and paged) and position counter
@@ -100,6 +102,8 @@ static float	check_target_prob(t_transformer *t, float *logits, int target_id)
 		sum_exp += expf(logits[i] - max_val);
 	return (expf(logits[target_id] - max_val) / sum_exp);
 }
+
+
 
 /*
 ** Single training epoch - feed prompt and learn

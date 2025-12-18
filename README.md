@@ -22,37 +22,35 @@ Tested with **Ministral 3B Reasoning**. The engine is functional but not yet ide
 
 ## Showcase: Nested Learning (Persistent Knowledge)
 
-The engine supports **Nested Learning**, allowing the model to learn new facts during a session and retain them across conversation turns via fluid weights.
+The engine supports **Nested Learning** with **Bigram Context Biases**, allowing the model to learn new facts during a session and recall them even after the KV cache is cleared.
 
-### 1. Interactive Demo
-Run the chat interface:
+### Interactive Demo
 ```bash
-make chat
-./chat Ministral-Stuff/consolidated.safetensors Ministral-Stuff/config.json
+make chat_adaptive
+./chat_adaptive Ministral-Stuff/consolidated.safetensors Ministral-Stuff/config.json Ministral-Stuff/tokenizer.json
 ```
 
-Inside the chat:
-1.  Type `raw` to enable raw completion mode (bypasses chat template).
-2.  Type `persist` to enable persistent learning mode.
-3.  Teach the model a new fact (repetition helps):
-    > Fact: The sky is green. Fact: The sky is green. Fact: The sky is green.
-4.  The model will update its fluid weights (look for `[State] Fluid Weights UPDATED`).
-5.  Prompt the model to complete the fact:
-    > Fact: The sky is
-6.  The model should answer "green".
-7.  Type `transient` to disable persistent mode and reset weights.
+**Commands:**
+- `LEARN <fact>` - Teach the model a new fact (5-epoch training)
+- `QUERY <text>` - Ask a question using learned biases
+- `RESET` - Clear KV cache (biases are retained)
+- `EXIT` - Quit
 
-### 2. Automated Benchmark
-We have a dedicated benchmark to validate this capability quantitatively.
+**Example Session:**
+```
+>> LEARN The secret code is 7742
+[LEARN] Done! Fact encoded in fluid weights.
 
-```bash
-# Build and run the benchmark
-make bench_learn NESTED_LR=0.00005 NL_MAX_STEPS=40
-./bench_learn Ministral-Stuff/consolidated.safetensors Ministral-Stuff/config.json
+>> RESET
+[RESET] KV cache cleared. Biases retained.
+
+>> QUERY The secret code is
+[ANSWER] 7742
 ```
 
-**What it does:**
-1.  **Teaches:** Feeds the model the fact "The sky is green" repeatedly.
-2.  **Persists:** Updates fluid weights based on the loss.
-3.  **Verifies:** Queries "The sky is" in a new context and checks if the model predicts "green".
-4.  **Success:** You should see `P('green')` increase and the model output "green".
+### Automated Test
+```bash
+make chat_adaptive_test
+./chat_adaptive_test Ministral-Stuff/consolidated.safetensors Ministral-Stuff/config.json Ministral-Stuff/tokenizer.json
+```
+

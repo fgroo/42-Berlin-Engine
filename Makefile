@@ -71,6 +71,12 @@ test_inference: $(LIB_OBJS) tests/test_inference.o
 chat: $(LIB_OBJS) src/chat.o
 	$(CC) $(LIB_OBJS) src/chat.o -o chat -lm $(LDFLAGS)
 
+chat_adaptive: $(LIB_OBJS) src/chat_adaptive.o
+	$(CC) $(LIB_OBJS) src/chat_adaptive.o -o chat_adaptive -lm $(LDFLAGS)
+
+chat_adaptive_test: $(LIB_OBJS) src/chat_adaptive_test.o
+	$(CC) $(LIB_OBJS) src/chat_adaptive_test.o -o chat_adaptive_test -lm $(LDFLAGS)
+
 bench_headless: $(LIB_OBJS) src/bench_headless.o
 	$(CC) $(LIB_OBJS) src/bench_headless.o -o bench_headless -lm $(LDFLAGS)
 
@@ -96,9 +102,9 @@ $(NAME): $(LIB_OBJS) main.o
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) main.o src/chat.o src/bench_headless.o src/bench_learn.o src/bench_perf.o src/bench_gradient.o src/bench_haystack.o
+	rm -f $(OBJS) main.o src/chat.o src/chat_adaptive.o src/chat_adaptive_test.o src/bench_headless.o src/bench_learn.o src/bench_perf.o src/bench_gradient.o src/bench_haystack.o
 
 fclean: clean
-	rm -f $(NAME) chat bench_headless bench_learn bench_perf bench_gradient bench_haystack
+	rm -f $(NAME) chat chat_adaptive chat_adaptive_test bench_headless bench_learn bench_perf bench_gradient bench_haystack
 
 re: fclean all

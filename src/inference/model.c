@@ -224,6 +224,9 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 	t->state.batch_hb = aligned_calloc(MAX_PREFILL_BATCH * t->config.hidden_dim, sizeof(float));
 	t->state.batch_hb2 = aligned_calloc(MAX_PREFILL_BATCH * t->config.hidden_dim, sizeof(float));
 	
+	// ========== NESTED LEARNING CONTEXT (TechLead Solution) ==========
+	t->state.token_history = calloc(t->config.seq_len, sizeof(int));
+	
 	// Init KV Cache
 	// Allocate 1GB for KV cache
 	size_t arena_size = 1024 * 1024 * 1024; 
@@ -313,6 +316,15 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 	t->logit_bias = calloc(t->config.vocab_size, sizeof(float));
 	printf("[LOGIT_BIAS] Initialized: [%d] = %lu bytes\n",
 		t->config.vocab_size, t->config.vocab_size * sizeof(float));
+
+	/* TechLead Solution: Context-Aware Bias Cache */
+	t->context_bias.size = 65536; // 64k entries
+	t->context_bias.keys = calloc(t->context_bias.size, sizeof(uint64_t));
+	t->context_bias.tokens = calloc(t->context_bias.size, sizeof(int));
+	t->context_bias.biases = calloc(t->context_bias.size, sizeof(float));
+	t->context_bias.count = 0;
+	printf("[CONTEXT_BIAS] Initialized: %d entries = %lu bytes\n",
+		t->context_bias.size, t->context_bias.size * (sizeof(uint64_t) + sizeof(int) + sizeof(float)));
 
 	t->state.kv_cache = calloc(t->config.n_layers, sizeof(t_kv_cache));
 	t_kv_init_params kv_params = {

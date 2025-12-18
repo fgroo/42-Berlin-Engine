@@ -64,6 +64,10 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 	t_tensor x_tensor, xb_tensor, hb_tensor, hb2_tensor;
 	t_tensor q_tensor, k_tensor, v_tensor;
 	t_tensor logits_tensor;
+	
+	/* Record token in history for context-aware backward pass */
+	if (s->token_history && pos >= 0 && pos < c->seq_len)
+		s->token_history[pos] = token;
 
 	// 1. Embedding
 	t_tensor *emb = t->weights.token_embedding;
@@ -606,6 +610,34 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 		#pragma omp parallel for schedule(static)
 		for (int i = 0; i < c->vocab_size; i++)
 			s->logits[i] += t->logit_bias[i];
+	}
+
+	/* TechLead Solution: Bigram Context-Aware Bias Cache Lookup */
+	if (t->context_bias.keys)
+	{
+		int prev_token = (pos > 0) ? t->state.token_history[pos - 1] : 1; // Default BOS=1
+		uint64_t key = ((uint64_t)prev_token << 32) | (uint32_t)token;
+		// Simple hash: MurmurHash3-style mixer
+		uint64_t h = key;
+		h ^= h >> 33;
+		h *= 0xff51afd7ed558ccdULL;
+		h ^= h >> 33;
+		h *= 0xc4ceb9fe1a85ec53ULL;
+		h ^= h >> 33;
+		uint32_t idx = (uint32_t)(h % t->context_bias.size);
+		
+		/* Linear probing */
+		for (int i = 0; i < 16; i++) // Limit probing for speed
+		{
+			uint32_t cur = (idx + i) % t->context_bias.size;
+			if (t->context_bias.keys[cur] == key)
+			{
+				s->logits[t->context_bias.tokens[cur]] += t->context_bias.biases[cur];
+				break ;
+			}
+			if (t->context_bias.keys[cur] == 0)
+				break ;
+		}
 	}
 
 	return (s->logits);

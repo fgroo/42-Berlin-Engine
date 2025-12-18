@@ -77,6 +77,8 @@ typedef struct s_inference_state
 	float	*batch_hb2;  // [batch_size x hidden_dim] - FFN buffer 2
 	// ========== FFN FUSION (Phase 11 v2) ==========
 	float	*hb_fused;   // [hidden_dim * 2] - fused gate+up output
+	// ========== NESTED LEARNING CONTEXT (TechLead Solution) ==========
+	int		*token_history; // [seq_len] - stores input tokens for backward pass
 }	t_inference_state;
 
 // Maximum batch size for prefill (tune for L2 cache: 64 * 3072 * 4 = 768KB)
@@ -151,11 +153,21 @@ typedef struct s_transformer
 	t_tensor			*final_adapter;      // [dim x dim] BF16 weights
 	float				*final_adapter_grad; // [dim x dim] FP32 gradient accumulator
 	/*
-	** Logit Bias [vocab_size] - Solution 5
-	** Added directly to logits before softmax.
-	** Most direct learning signal possible.
+	** Logit Bias [vocab_size] - Solution 5 (Global)
 	*/
 	float				*logit_bias;         // [vocab_size] FP32 bias
+	
+	/*
+	** Context-Aware Bias Cache - TechLead Solution
+	** Maps (pos, prev_token) -> (target_token, bias)
+	*/
+	struct {
+		uint64_t	*keys;      // (pos << 32) | prev_token
+		int			*tokens;    // target_token_id
+		float		*biases;    // bias value
+		int			size;       // hash table size
+		int			count;      // current number of entries
+	} context_bias;
 }	t_transformer;
 
 int		transformer_init(t_transformer *t, const char *model_path, const char *config_path);

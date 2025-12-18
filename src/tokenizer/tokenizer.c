@@ -423,6 +423,13 @@ int	tokenizer_init(t_tokenizer *t, const char *json_path)
 		}
 	}
 	fclose(f);
+	
+	if (t->vocab_size == 0)
+	{
+		fprintf(stderr, "Error: No vocab found in %s. Is it a valid tokenizer.json?\n", json_path);
+		return (1);
+	}
+	
 	// printf("Tokenizer init done\n");
 	return (0);
 }

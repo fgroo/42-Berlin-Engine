@@ -125,25 +125,7 @@ void	backward_apply_grads(t_transformer *t, float lr)
 		}
 		layer--;
 	}
-	/* DEBUG: Print weight statistics after gradient application */
-	{
-		float weight_sum = 0.0f;
-		float weight_max = 0.0f;
-		int layer_23 = 23;  /* Check layer 23 as sample */
-		if (layer_23 < t->config.n_layers && t->fluid_layers[layer_23].w2_weight)
-		{
-			t_bf16 *w = (t_bf16 *)t->fluid_layers[layer_23].w2_weight->data;
-			size_t sz = (size_t)t->config.dim * t->config.hidden_dim;
-			for (size_t i = 0; i < sz; i++)
-			{
-				float val = bf16_to_float(w[i]);
-				weight_sum += fabsf(val);
-				if (fabsf(val) > weight_max)
-					weight_max = fabsf(val);
-			}
-			printf("[DEBUG] Layer 23 weights: sum=%.6f, max=%.6f\n", weight_sum, weight_max);
-		}
-	}
+
 	
 	/* Solution 4: Apply gradients to final_adapter [dim x dim] */
 	if (t->final_adapter && t->final_adapter_grad && t->final_adapter->data)
@@ -351,12 +333,11 @@ void	transformer_backward_step(t_transformer *t, int target_token, int pos)
 	s->logits[target_token] -= 1.0f;
 	loss = -logf(target_prob + 1e-8f);
 	
-	/* Solution 5: Update logit_bias - SPARSE UPDATE (target only) */
-	/* The dense update was causing collateral damage to other tokens */
-	/* Now we ONLY boost the target token's bias */
+	/* Solution 5: Update logit_bias - DISABLED in favor of Context-Aware Bias */
+#if 0
 	if (t->logit_bias)
 	{
-		float logit_bias_lr = t->nested_lr * 5000.0f;  // Balanced for sequence
+		float logit_bias_lr = t->nested_lr * 50000.0f;  // Extreme for 1-epoch recall
 		
 		/* SPARSE UPDATE: Only increase target token's bias */
 		/* gradient[target] = softmax[target] - 1 = negative, so bias INCREASES */
@@ -378,6 +359,43 @@ void	transformer_backward_step(t_transformer *t, int target_token, int pos)
 		if (bias_debug++ % 50 == 0)
 			printf("[LOGIT_BIAS] bias[%d]=%.4f\n", 
 				target_token, t->logit_bias[target_token]);
+	}
+#endif
+
+	/* TechLead Solution: Bigram Context-Aware Bias Update */
+	if (t->context_bias.keys)
+	{
+		float context_lr = t->nested_lr * 50000.0f; // High LR for fast learning
+		int current_token = t->state.token_history[pos];
+		int prev_token = (pos > 0) ? t->state.token_history[pos - 1] : 1; // Default BOS=1
+		uint64_t key = ((uint64_t)prev_token << 32) | (uint32_t)current_token;
+		
+		// Hash and probe
+		uint64_t h = key;
+		h ^= h >> 33;
+		h *= 0xff51afd7ed558ccdULL;
+		h ^= h >> 33;
+		h *= 0xc4ceb9fe1a85ec53ULL;
+		h ^= h >> 33;
+		uint32_t idx = (uint32_t)(h % t->context_bias.size);
+		
+		for (int i = 0; i < 16; i++)
+		{
+			uint32_t cur = (idx + i) % t->context_bias.size;
+			if (t->context_bias.keys[cur] == key)
+			{
+				t->context_bias.biases[cur] += context_lr;
+				break ;
+			}
+			if (t->context_bias.keys[cur] == 0)
+			{
+				t->context_bias.keys[cur] = key;
+				t->context_bias.tokens[cur] = target_token;
+				t->context_bias.biases[cur] = context_lr;
+				t->context_bias.count++;
+				break ;
+			}
+		}
 	}
 	/* NOISE FILTER: Skip high-loss tokens (complete confusion) */
 	if (loss > HIGH_LOSS_THRESHOLD)

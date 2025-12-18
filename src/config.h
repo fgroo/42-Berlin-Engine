@@ -35,7 +35,7 @@
 # endif
 
 # ifndef LEARNING_THRESHOLD
-#  define LEARNING_THRESHOLD 2.0f  // Skip tokens where model isn't surprised
+#  define LEARNING_THRESHOLD 0.01f  // Learn everything
 # endif
 
 # ifndef HIGH_LOSS_THRESHOLD
@@ -51,7 +51,7 @@
 # endif
 
 # ifndef ADAPTER_SCALE
-#  define ADAPTER_SCALE 500.0f  // Balanced: effective signal without explosion
+#  define ADAPTER_SCALE 1.0f  // Subtle contribution, allows context_bias to lead
 # endif
 
 # ifndef MAX_GEN_LEN

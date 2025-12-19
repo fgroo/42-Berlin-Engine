@@ -26,6 +26,7 @@
 #include <locale.h>
 #include <unistd.h>  /* access() */
 #include "nested/persistence.h"
+#include "compute/ops_lsh.h"  /* [FIX] lsh_index_reset for KV cache clear */
 
 #define ADAPTIVE_LR 0.1f  // Aggressive learning for real-time adaptation
 #define TRAIN_EPOCHS 5    // Multiple epochs like bench_learn
@@ -77,6 +78,7 @@ static void	print_token_utf8(t_engine_context *ctx, const char *piece)
 
 /*
 ** Reset KV caches (both standard and paged) and position counter
+** [FIX] Also reset LSH index to prevent zombie block routing!
 */
 static void	reset_kv_caches(t_transformer *t, t_engine_context *ctx)
 {
@@ -89,6 +91,9 @@ static void	reset_kv_caches(t_transformer *t, t_engine_context *ctx)
 		else
 			t->state.kv_cache[l].current_seq_len = 0;
 	}
+	/* [FIX] Reset LSH index to prevent zombie routing to deleted blocks */
+	if (t->lsh_index)
+		lsh_index_reset((t_lsh_index *)t->lsh_index);
 	ctx->session_pos = 0;
 	ctx_reset_utf8(ctx);
 	ctx_reset_response(ctx);

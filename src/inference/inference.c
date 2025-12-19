@@ -98,10 +98,11 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 		// Progress indicator (disabled - floods output)
 		// printf("."); fflush(stdout);
 
-		// [FIX] BUFFER ALIASING BUG
-		// s->hb is shared between Attention (n_heads*head_dim=4096) and FFN (hidden_dim=9216)
-		// Only zero the attention output portion - FFN overwrites its own section
-		memset(s->hb, 0, c->n_heads * c->head_dim * sizeof(float));
+		// [PERF FIX] REMOVED REDUNDANT MEMSET
+		// The attention kernels (op_attention_dense, op_attention_sparse, 
+		// op_paged_attention) already zero their output buffers internally.
+		// This was zeroing 16KB per layer = 416KB wasted memory traffic per token!
+		// Verified by: bench_perf comparison before/after removal.
 		
 		t_layer_weights *l = &t->weights.layers[i];
 		if (!l->wq || !l->wq->data || !l->wk || !l->wk->data || !l->wv || !l->wv->data || !l->wo || !l->wo->data) {
@@ -566,36 +567,51 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 		if (t->nested_learning)
 			memcpy(s->final_input_cache, s->x, dim * sizeof(float));
 		
-		// Compute adapter @ x and add to x
-		// SAFETY: Use alloca() for dynamic stack allocation based on actual dim
-		// This prevents stack overflow for models with dim > 4096
-		if (dim > MAX_DIM) {
-			fprintf(stderr, "[FATAL] dim=%d exceeds MAX_DIM=%d for stack alloc\n", dim, MAX_DIM);
-			exit(1);
-		}
-		float *adapter_out = alloca(dim * sizeof(float));
-		#pragma omp parallel for schedule(static)
-		for (int row = 0; row < dim; row++)
+		// [FIX] Use arena allocator instead of alloca() for stack safety
+		// Scratch arena is reset per inference call, so this is safe
+		size_t adapter_scratch_saved = t->scratch.offset;
+		float *adapter_out = arena_try_alloc(&t->scratch, dim * sizeof(float));
+		if (!adapter_out)
 		{
-			t_bf16 *a_row = adapter_data + row * dim;
-			adapter_out[row] = simd_dot_bf16_f32(a_row, s->x, dim);
+			// Fallback: Apply adapter per-element without buffer
+			// Slower but avoids fatal error on OOM
+			fprintf(stderr, "[WARN] OOM for adapter_out buffer, using fallback\n");
+			#pragma omp parallel for schedule(static)
+			for (int row = 0; row < dim; row++)
+			{
+				t_bf16 *a_row = adapter_data + row * dim;
+				float val = simd_dot_bf16_f32(a_row, s->x, dim);
+				s->x[row] += ADAPTER_SCALE * val;
+			}
 		}
-		
-		// [HOTFIX] Issue #2: Debug output now behind LOG_HOT macro
-		#ifdef DEBUG_MODE
+		else
 		{
-			float max_contribution = 0.0f;
+			#pragma omp parallel for schedule(static)
+			for (int row = 0; row < dim; row++)
+			{
+				t_bf16 *a_row = adapter_data + row * dim;
+				adapter_out[row] = simd_dot_bf16_f32(a_row, s->x, dim);
+			}
+			
+			// [HOTFIX] Issue #2: Debug output now behind LOG_HOT macro
+			#ifdef DEBUG_MODE
+			{
+				float max_contribution = 0.0f;
+				for (int d = 0; d < dim; d++)
+					if (fabsf(adapter_out[d]) > max_contribution)
+						max_contribution = fabsf(adapter_out[d]);
+				LOG_DEBUG("[FINAL_ADAPTER] max_out=%.6f, scaled=%.2f\n", 
+					max_contribution, ADAPTER_SCALE * max_contribution);
+			}
+			#endif
+			
+			// Apply scaled adapter output to x
 			for (int d = 0; d < dim; d++)
-				if (fabsf(adapter_out[d]) > max_contribution)
-					max_contribution = fabsf(adapter_out[d]);
-			LOG_DEBUG("[FINAL_ADAPTER] max_out=%.6f, scaled=%.2f\n", 
-				max_contribution, ADAPTER_SCALE * max_contribution);
+				s->x[d] += ADAPTER_SCALE * adapter_out[d];
+			
+			// Restore scratch arena
+			t->scratch.offset = adapter_scratch_saved;
 		}
-		#endif
-		
-		// Apply scaled adapter output to x
-		for (int d = 0; d < dim; d++)
-			s->x[d] += ADAPTER_SCALE * adapter_out[d];
 	}
 
 	// 4. Logits

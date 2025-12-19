@@ -86,7 +86,7 @@ MAIN_OBJ = $(MAIN_SRC:.c=.o)
 # ============================================================================
 # Targets
 # ============================================================================
-.PHONY: all clean fclean re debug help
+.PHONY: all clean fclean re debug release help
 
 all: $(NAME)
 	@echo ""
@@ -107,6 +107,25 @@ debug: LDFLAGS += -fsanitize=address
 debug: fclean $(NAME)
 	@echo ""
 	@echo "[DEBUG] Built with -g -fsanitize=address"
+	@echo ""
+
+# Release build (Gold Master) - stripped, no debug, maximum optimization
+release: fclean
+	@echo ""
+	@echo "╔══════════════════════════════════════════════════════════════╗"
+	@echo "║       42-BERLIN-ENGINE: Gold Master Build                    ║"
+	@echo "╚══════════════════════════════════════════════════════════════╝"
+	@echo ""
+	$(CC) $(CFLAGS_RELEASE) -DNDEBUG $(LIB_SRCS) $(MAIN_SRC) -o $(NAME) $(LDFLAGS)
+	@strip $(NAME)
+	@echo ""
+	@ls -lh $(NAME) | awk '{print "  Binary: " $$9 " (" $$5 ")"}'
+	@echo "  Symbols: stripped"
+	@echo "  Flags: -O3 -DNDEBUG -march=native"
+	@echo ""
+	@echo "═══════════════════════════════════════════════════════════════"
+	@echo "       GOLD MASTER READY FOR DEPLOYMENT"
+	@echo "═══════════════════════════════════════════════════════════════"
 	@echo ""
 
 # Pattern rule for object files
@@ -140,7 +159,8 @@ help:
 	@echo "╚══════════════════════════════════════════════════════════════╝"
 	@echo ""
 	@echo "Targets:"
-	@echo "  make           Build optimized release binary"
+	@echo "  make           Build optimized binary"
+	@echo "  make release   Gold Master build (stripped, -DNDEBUG)"
 	@echo "  make debug     Build with debug symbols + AddressSanitizer"
 	@echo "  make clean     Remove object files"
 	@echo "  make fclean    Remove all build artifacts"

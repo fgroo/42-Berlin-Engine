@@ -107,6 +107,17 @@ void	lsh_index_init(t_lsh_index *idx)
 }
 
 /*
+** Reset LSH index to empty state (call when clearing KV cache!)
+** This prevents "zombie routing" where new tokens get routed to
+** old, deleted key positions after a context reset.
+*/
+void	lsh_index_reset(t_lsh_index *idx)
+{
+	/* Just re-use the init logic - they're functionally identical */
+	lsh_index_init(idx);
+}
+
+/*
 ** ============================================================================
 ** LSH HASH TURBO (Phase 10): Column-Major SIMD
 ** ============================================================================

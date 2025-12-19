@@ -14,6 +14,7 @@
 #include "tokenizer/tokenizer.h"
 #include "memory/arena.h"
 #include "memory/paged.h"
+#include "compute/ops_lsh.h"  /* [FIX] lsh_index_reset */
 #include "chat.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,6 +49,9 @@ static void	reset_kv_caches(t_transformer *t)
 		if (t->use_paged_kv && t->paged_kv)
 			paged_kv_reset(&t->paged_kv[l]);
 	}
+	/* [FIX] Reset LSH index to prevent zombie routing */
+	if (t->lsh_index)
+		lsh_index_reset((t_lsh_index *)t->lsh_index);
 }
 
 /*

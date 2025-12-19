@@ -90,6 +90,9 @@ void		lsh_init(t_lsh_ctx *ctx, int dim, unsigned int seed);
 /* Initialize empty index */
 void		lsh_index_init(t_lsh_index *idx);
 
+/* Reset index to empty state (call when clearing KV cache!) */
+void		lsh_index_reset(t_lsh_index *idx);
+
 /* Compute LSH hash for a vector (16-bit) */
 uint16_t	lsh_hash(const t_lsh_ctx *ctx, const float *vec);
 

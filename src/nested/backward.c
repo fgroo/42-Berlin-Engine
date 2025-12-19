@@ -333,34 +333,11 @@ void	transformer_backward_step(t_transformer *t, int target_token, int pos)
 	s->logits[target_token] -= 1.0f;
 	loss = -logf(target_prob + 1e-8f);
 	
-	/* Solution 5: Update logit_bias - DISABLED in favor of Context-Aware Bias */
-#if 0
-	if (t->logit_bias)
-	{
-		float logit_bias_lr = t->nested_lr * 50000.0f;  // Extreme for 1-epoch recall
-		
-		/* SPARSE UPDATE: Only increase target token's bias */
-		/* gradient[target] = softmax[target] - 1 = negative, so bias INCREASES */
-		/* We don't update other tokens anymore to avoid collateral damage */
-		t->logit_bias[target_token] += logit_bias_lr * 1.0f;  // Direct boost
-		
-		/* Small decay on non-target tokens to prevent explosion */
-		static int decay_counter = 0;
-		if (decay_counter++ % 100 == 0)  // Only decay occasionally
-		{
-			#pragma omp parallel for schedule(static)
-			for (int i = 0; i < c->vocab_size; i++)
-				if (i != target_token)
-					t->logit_bias[i] *= 0.99f;  // Slight decay
-		}
-		
-		/* Debug: show target token bias */
-		static int bias_debug = 0;
-		if (bias_debug++ % 50 == 0)
-			printf("[LOGIT_BIAS] bias[%d]=%.4f\n", 
-				target_token, t->logit_bias[target_token]);
-	}
-#endif
+	/*
+	** Note: Logit bias update logic (Solution 5) was removed during cleanup.
+	** It contained thread-unsafe static counters and was replaced by the
+	** Context-Aware Bigram Bias approach below.
+	*/
 
 	/* TechLead Solution: Bigram Context-Aware Bias Update */
 	if (t->context_bias.keys)

@@ -33,6 +33,7 @@
 #include "memory/kv_cache.h"
 #include "memory/paged.h"
 #include "nested/persistence.h"
+#include "compute/ops_lsh.h"  /* [FIX] lsh_index_reset */
 #include "config.h"
 #include "engine_context.h"
 #include "safe_alloc.h"
@@ -253,6 +254,9 @@ static void	reset_kv_caches(t_transformer *t, t_engine_context *ctx)
 		else
 			t->state.kv_cache[l].current_seq_len = 0;
 	}
+	/* [FIX] Reset LSH index to prevent zombie routing */
+	if (t->lsh_index)
+		lsh_index_reset((t_lsh_index *)t->lsh_index);
 	ctx->session_pos = 0;
 	ctx_reset_utf8(ctx);
 	ctx_reset_response(ctx);

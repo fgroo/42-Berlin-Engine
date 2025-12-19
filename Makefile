@@ -71,7 +71,8 @@ NESTED_SRCS = $(SRC_DIR)/nested/fluid.c \
               $(SRC_DIR)/nested/fluid_backward.c \
               $(SRC_DIR)/nested/backward.c \
               $(SRC_DIR)/nested/optimizer.c \
-              $(SRC_DIR)/nested/persistence.c
+              $(SRC_DIR)/nested/persistence.c \
+              $(SRC_DIR)/fluid/fluid_io.c
 
 ENGINE_SRCS = $(SRC_DIR)/tokenizer/tokenizer.c \
               $(SRC_DIR)/inference/inference.c \
@@ -145,6 +146,7 @@ fclean: clean
 	rm -f $(NAME)
 	rm -f chat chat_adaptive bench_perf bench_learn bench_haystack
 	rm -f engine_test test_tokenizer test_inference
+	rm -f fluid-info fluid-merge fluid-get fluid-test dump_tensors
 	@echo "[FCLEAN] All binaries removed."
 
 re: fclean all
@@ -178,5 +180,24 @@ help:
 chat_adaptive: $(LIB_OBJS) $(SRC_DIR)/chat_adaptive.o
 	$(CC) $(LIB_OBJS) $(SRC_DIR)/chat_adaptive.o -o chat_adaptive $(LDFLAGS)
 
-bench_perf: $(LIB_OBJS) $(SRC_DIR)/bench_perf.o
-	$(CC) $(LIB_OBJS) $(SRC_DIR)/bench_perf.o -o bench_perf $(LDFLAGS)
+bench_perf: $(LIB_OBJS) tests/benchmarks/bench_perf.o
+	$(CC) $(LIB_OBJS) tests/benchmarks/bench_perf.o -o bench_perf $(LDFLAGS)
+
+# ============================================================================
+# Fluid Tools (libfluid ecosystem)
+# ============================================================================
+tools: fluid-info fluid-merge fluid-get
+	@echo "[TOOLS] Fluid ecosystem tools built."
+
+fluid-info: $(SRC_DIR)/fluid/fluid_info.c $(SRC_DIR)/fluid/fluid_io.c
+	$(CC) -Wall -Wextra -O2 -Isrc $(SRC_DIR)/fluid/fluid_info.c $(SRC_DIR)/fluid/fluid_io.c -o fluid-info
+	@echo "[TOOLS] Built fluid-info"
+
+fluid-merge: $(SRC_DIR)/fluid/fluid_merge.c
+	$(CC) -Wall -Wextra -O2 -Isrc $(SRC_DIR)/fluid/fluid_merge.c -o fluid-merge
+	@echo "[TOOLS] Built fluid-merge"
+
+fluid-get: $(SRC_DIR)/fluid/fluid_get.c
+	$(CC) -Wall -Wextra -O2 -Isrc $(SRC_DIR)/fluid/fluid_get.c -o fluid-get
+	@echo "[TOOLS] Built fluid-get"
+

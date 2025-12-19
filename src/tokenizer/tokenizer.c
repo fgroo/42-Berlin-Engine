@@ -11,7 +11,7 @@
 /* ************************************************************************** */
 
 #include "tokenizer.h"
-#include "../safe_alloc.h"
+#include "../memory/safe_alloc.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -427,6 +427,13 @@ int	tokenizer_init(t_tokenizer *t, const char *json_path)
 	if (t->vocab_size == 0)
 	{
 		fprintf(stderr, "Error: No vocab found in %s. Is it a valid tokenizer.json?\n", json_path);
+		/* [FIX] Free allocated memory before returning error */
+		if (ti->merge_map)
+			free(ti->merge_map);
+		if (ti->vocab_map)
+			free(ti->vocab_map);
+		free(ti);
+		t->priv = NULL;
 		return (1);
 	}
 	

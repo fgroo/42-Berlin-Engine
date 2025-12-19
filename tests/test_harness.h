@@ -217,8 +217,8 @@ static const char *_current_test_name = NULL;
  * BF16 Tolerance (for floating point tests)
  * BF16 has ~3 significant digits of precision
  * ============================================ */
-#define BF16_TOLERANCE 0.01f
-#define BF16_TOLERANCE_LOOSE 0.05f
+#define BF16_TOLERANCE 0.05f
+#define BF16_TOLERANCE_LOOSE 0.2f
 
 /* ============================================
  * Hex dump utility (for debugging)

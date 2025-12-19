@@ -36,7 +36,7 @@
 #include "compute/ops_lsh.h"  /* [FIX] lsh_index_reset */
 #include "config.h"
 #include "engine_context.h"
-#include "safe_alloc.h"
+#include "memory/safe_alloc.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,7 +61,8 @@
 typedef enum e_mode
 {
 	MODE_CHAT,
-	MODE_BENCH
+	MODE_BENCH,
+	MODE_FORGE  /* Headless training mode for Fluid Forge */
 }	t_mode;
 
 typedef struct s_cli_config
@@ -120,10 +121,12 @@ static void	print_usage(const char *prog)
 	printf("  -f <path>       Fluid state file for persistence\n");
 	printf("\n");
 	printf("Runtime Options:\n");
-	printf("  --mode <mode>   Operation mode: chat, bench (default: chat)\n");
+	printf("  --mode <mode>   Operation mode: chat, bench, forge (default: chat)\n");
 	printf("  --learn         Enable Nested Learning (default: inference only)\n");
 	printf("  --steps <n>     Benchmark: number of tokens to generate\n");
 	printf("  --threads <n>   Override OMP_NUM_THREADS\n");
+	printf("\nForge Mode (Automated Training):\n");
+	printf("  Commands via stdin: LEARN <text>, FLUSH <file>, RESET, EXIT\n");
 	printf("\n");
 	printf("Other:\n");
 	printf("  -h, --help      Show this help\n");
@@ -167,6 +170,8 @@ static int	parse_args(int argc, char **argv, t_cli_config *cfg)
 			i++;
 			if (strcmp(argv[i], "bench") == 0)
 				cfg->mode = MODE_BENCH;
+			else if (strcmp(argv[i], "forge") == 0)
+				cfg->mode = MODE_FORGE;
 			else
 				cfg->mode = MODE_CHAT;
 		}
@@ -518,6 +523,115 @@ static int	run_bench_mode(t_transformer *t, t_tokenizer *tok,
 }
 
 /* ============================================================================
+** Forge Mode (Headless Training for Fluid Capsules)
+** ============================================================================
+** Protocol:
+**   LEARN <text>  - Learn the text via teacher forcing
+**   FLUSH <file>  - Save current state to .fluid file
+**   RESET         - Clear KV cache and LSH index
+**   EXIT          - Shutdown
+** ============================================================================ */
+
+#define FORGE_LR 0.02f
+#define FORGE_EPOCHS 3
+
+static int	run_forge_mode(t_transformer *t, t_tokenizer *tok,
+				t_engine_context *ctx)
+{
+	char	buffer[16384];
+	int		*tokens;
+	int		n_tokens;
+	int		i;
+	int		epoch;
+
+	/* Disable stdout buffering for fast pipe communication */
+	setvbuf(stdout, NULL, _IONBF, 0);
+
+	/* Signal ready to controller */
+	printf("READY\n");
+
+	/* Auto-enable learning in forge mode */
+	t->nested_learning = 1;
+
+	while (fgets(buffer, sizeof(buffer), stdin))
+	{
+		/* Strip newline */
+		buffer[strcspn(buffer, "\n")] = 0;
+
+		/* LEARN <text> - Supervised learning on text */
+		if (strncmp(buffer, "LEARN ", 6) == 0)
+		{
+			const char *text = buffer + 6;
+
+			/* Tokenize */
+			n_tokens = tokenizer_encode(tok, text, &tokens);
+			if (n_tokens <= 1)
+			{
+				printf("ERROR Too few tokens\n");
+				continue;
+			}
+
+			/* Multi-epoch teacher forcing */
+			for (epoch = 0; epoch < FORGE_EPOCHS; epoch++)
+			{
+				/* Reset context for clean learning */
+				reset_kv_caches(t, ctx);
+				backward_zero_grads(t);
+
+				/* Forward + backward for each token pair */
+				for (i = 0; i < n_tokens - 1; i++)
+				{
+					transformer_forward(t, tokens[i], ctx->session_pos);
+					transformer_backward_step(t, tokens[i + 1], ctx->session_pos);
+					ctx->session_pos++;
+				}
+
+				/* Apply accumulated gradients */
+				backward_apply_grads(t, FORGE_LR);
+			}
+
+			free(tokens);
+			reset_kv_caches(t, ctx);
+			printf("OK\n");
+		}
+		/* FLUSH <filename> - Save fluid state */
+		else if (strncmp(buffer, "FLUSH ", 6) == 0)
+		{
+			const char *filename = buffer + 6;
+			t_fluid_save_opts opts = {
+				.domain = "forged",
+				.author = "Fluid-Forge",
+				.description = "Auto-trained knowledge capsule",
+				.base_model_hash = 0
+			};
+			if (fluid_save_v2(t, filename, &opts) == 0)
+				printf("SAVED %s\n", filename);
+			else
+				printf("ERROR Save failed\n");
+		}
+		/* RESET - Clear KV cache and LSH */
+		else if (strncmp(buffer, "RESET", 5) == 0)
+		{
+			reset_kv_caches(t, ctx);
+			printf("RESET_OK\n");
+		}
+		/* EXIT - Shutdown */
+		else if (strncmp(buffer, "EXIT", 4) == 0)
+		{
+			printf("BYE\n");
+			break;
+		}
+		/* Unknown command */
+		else
+		{
+			printf("ERROR Unknown command\n");
+		}
+	}
+
+	return (0);
+}
+
+/* ============================================================================
 ** Main Entry Point
 ** ============================================================================ */
 
@@ -552,7 +666,9 @@ int	main(int argc, char **argv)
 	printf("[INIT] Model:     %s\n", cfg.model_path);
 	printf("[INIT] Config:    %s\n", cfg.config_path);
 	printf("[INIT] Tokenizer: %s\n", cfg.tokenizer_path);
-	printf("[INIT] Mode:      %s\n", cfg.mode == MODE_BENCH ? "benchmark" : "chat");
+	printf("[INIT] Mode:      %s\n", 
+		cfg.mode == MODE_BENCH ? "benchmark" : 
+		(cfg.mode == MODE_FORGE ? "forge" : "chat"));
 	printf("[INIT] Learning:  %s\n", cfg.enable_learn ? "enabled" : "disabled");
 	if (cfg.fluid_path)
 		printf("[INIT] Fluid:     %s\n", cfg.fluid_path);
@@ -594,9 +710,15 @@ int	main(int argc, char **argv)
 	signal(SIGINT, signal_handler);
 
 	/* Run selected mode */
-	printf("[READY] Engine initialized. Press Ctrl+C to safely exit.\n");
+	if (cfg.mode == MODE_FORGE)
+		printf("[READY] Engine in FORGE mode. Awaiting commands via stdin.\n");
+	else
+		printf("[READY] Engine initialized. Press Ctrl+C to safely exit.\n");
+
 	if (cfg.mode == MODE_BENCH)
 		ret = run_bench_mode(&t, &tok, &ctx, cfg.bench_steps);
+	else if (cfg.mode == MODE_FORGE)
+		ret = run_forge_mode(&t, &tok, &ctx);
 	else
 		ret = run_chat_mode(&t, &tok, &ctx, cfg.fluid_path);
 

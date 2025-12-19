@@ -17,6 +17,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
+#include <time.h>  /* [FIX] For time-based RNG seed */
 #include <omp.h>
 
 /*
@@ -95,9 +96,10 @@ void	backward_apply_grads(t_transformer *t, float lr)
 			layer--;
 			continue ;
 		}
-		/* Initialize per-layer RNG with unique seed */
-		/* layer + time + 1 ensures non-zero seed for different layers */
-		xorshift_init(&rng, (uint64_t)layer * 0xDEADBEEF + 0x42424242ULL);
+		/* [FIX] Initialize RNG with time-varying seed for true stochasticity */
+		/* Static counter ensures different seed per call, not just per layer */
+		static uint64_t call_counter = 0;
+		xorshift_init(&rng, (uint64_t)time(NULL) ^ (++call_counter * 0xDEADBEEF) ^ (uint64_t)layer);
 		/* GLOBAL GRADIENT NORM CLIPPING */
 		/* Compute L2 norm using SIMD (16x faster than scalar loop) */
 		grad_norm = ops_simd_norm(grad, size);
@@ -133,8 +135,10 @@ void	backward_apply_grads(t_transformer *t, float lr)
 		t_bf16 *fa_weight = (t_bf16 *)t->final_adapter->data;
 		float *fa_grad = t->final_adapter_grad;
 		size_t fa_size = (size_t)t->config.dim * t->config.dim;
+		/* [FIX] Use time-varying seed for final adapter RNG too */
 		t_xorshift_state fa_rng;
-		xorshift_init(&fa_rng, 0xFACECAFE42ULL);
+		static uint64_t fa_counter = 0;
+		xorshift_init(&fa_rng, (uint64_t)time(NULL) ^ (++fa_counter * 0xCAFEFACE));
 		
 		/* Compute gradient norm for clipping */
 		float fa_grad_norm = ops_simd_norm(fa_grad, fa_size);
@@ -347,6 +351,18 @@ void	transformer_backward_step(t_transformer *t, int target_token, int pos)
 		int prev_token = (pos > 0) ? t->state.token_history[pos - 1] : 1; // Default BOS=1
 		uint64_t key = ((uint64_t)prev_token << 32) | (uint32_t)current_token;
 		
+		/* [FIX] Load factor warning at 75% capacity */
+		if (t->context_bias.count > (t->context_bias.size * 3 / 4))
+		{
+			static int warned = 0;
+			if (!warned)
+			{
+				fprintf(stderr, "[WARN] Context bias 75%% full (%d/%d). Consider increasing size.\n",
+					t->context_bias.count, t->context_bias.size);
+				warned = 1;
+			}
+		}
+		
 		// Hash and probe
 		uint64_t h = key;
 		h ^= h >> 33;
@@ -356,12 +372,14 @@ void	transformer_backward_step(t_transformer *t, int target_token, int pos)
 		h ^= h >> 33;
 		uint32_t idx = (uint32_t)(h % t->context_bias.size);
 		
-		for (int i = 0; i < 16; i++)
+		int inserted = 0;
+		for (int i = 0; i < LINEAR_PROBE_LIMIT; i++)
 		{
 			uint32_t cur = (idx + i) % t->context_bias.size;
 			if (t->context_bias.keys[cur] == key)
 			{
 				t->context_bias.biases[cur] += context_lr;
+				inserted = 1;
 				break ;
 			}
 			if (t->context_bias.keys[cur] == 0)
@@ -370,8 +388,17 @@ void	transformer_backward_step(t_transformer *t, int target_token, int pos)
 				t->context_bias.tokens[cur] = target_token;
 				t->context_bias.biases[cur] = context_lr;
 				t->context_bias.count++;
+				inserted = 1;
 				break ;
 			}
+		}
+		/* [FIX] Log warning if linear probe exhausted without finding slot */
+		if (!inserted)
+		{
+			static int exhaust_count = 0;
+			if (++exhaust_count <= 5)
+				fprintf(stderr, "[WARN] Context bias probe exhausted (key=%llu). Fact lost!\n",
+					(unsigned long long)key);
 		}
 	}
 	/* NOISE FILTER: Skip high-loss tokens (complete confusion) */
@@ -452,9 +479,10 @@ void	transformer_backward_step(t_transformer *t, int target_token, int pos)
 		{
 			float grad_xi = s->grad_x[i] * ADAPTER_SCALE;  // Chain rule: scale factor
 			float *grad_row = grad + i * dim;
+			/* [FIX] Use final_input_cache (pre-adapter state) not s->x (post-adapter) */
 			for (int j = 0; j < dim; j++)
 			{
-				grad_row[j] += grad_xi * s->x[j];
+				grad_row[j] += grad_xi * s->final_input_cache[j];
 			}
 		}
 	}

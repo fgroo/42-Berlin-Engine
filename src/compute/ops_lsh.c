@@ -407,7 +407,7 @@ int	lsh_get_active_block(const t_lsh_index *idx, int *start_pos, int *len)
 
 #include <stdio.h>
 #include "ops_simd.h"  /* bf16_to_f32_safe */
-#include "../safe_alloc.h"  /* xmalloc */
+#include "../memory/safe_alloc.h"  /* xmalloc */
 
 /*
 ** Reset atomic stats (called at start of benchmark/session)

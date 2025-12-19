@@ -16,7 +16,7 @@
 #include "memory/paged.h"
 #include "config.h"
 #include "engine_context.h"
-#include "safe_alloc.h"
+#include "memory/safe_alloc.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

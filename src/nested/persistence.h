@@ -6,7 +6,7 @@
 /*   By: fgroo <fgroo@student.42berlin.de>          +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2025/12/19 10:30:00 by fgroo             #+#    #+#             */
-/*   Updated: 2025/12/19 10:30:00 by fgroo            ###   ########.fr       */
+/*   Updated: 2025/12/19 19:00:00 by fgroo            ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -14,32 +14,32 @@
 # define PERSISTENCE_H
 
 # include <stdint.h>
+# include "../fluid/fluid_spec.h"
 
 /* Forward declaration - avoid circular include */
 struct s_transformer;
 
 /*
 ** ============================================================================
-** FLUID FILE FORMAT (.fluid)
+** FLUID PERSISTENCE - Protocol v2 Integration
 ** ============================================================================
-** Binary format for persistent learned state.
-** Only non-zero entries are stored (sparse storage).
+** This module bridges the inference engine with the Fluid Protocol v2.
+** It uses the t_fluid_entry format from fluid_spec.h for portable storage.
 **
-** Layout:
-**   [Header: 32 bytes]
-**   [Context Bias Entries: 16 bytes each]
-**   [Final Adapter Flag: 4 bytes]
-**   [Final Adapter Data: dim*dim*2 bytes if flag=1]
+** Features:
+**   - Sparse storage (only non-zero entries)
+**   - Metadata support (domain, author, description)
+**   - Base model hash for compatibility checking
+**   - Support for final adapter weights
 ** ============================================================================
 */
-
-# define FLUID_MAGIC "42FL"
-# define FLUID_VERSION 1
 
 /*
-** File header - 32 bytes
+** Legacy format support - for loading old v1 files
 */
-typedef struct s_fluid_header
+# define FLUID_V1_MAGIC "42FL"
+
+typedef struct s_fluid_v1_header
 {
 	char		magic[4];		/* "42FL" */
 	uint32_t	version;		/* Format version (1) */
@@ -48,31 +48,46 @@ typedef struct s_fluid_header
 	uint32_t	n_bias_entries;	/* Number of context bias entries */
 	uint32_t	has_adapter;	/* 1 if final_adapter is stored */
 	uint32_t	reserved[2];	/* Future expansion */
-}	t_fluid_header;
+}	t_fluid_v1_header;
 
-/*
-** Context bias entry - 16 bytes (sparse storage)
-*/
-typedef struct s_fluid_bias_entry
+typedef struct s_fluid_v1_bias_entry
 {
 	uint64_t	key;			/* Hash key: (prev_token << 32) | current_token */
 	int32_t		target_token;	/* Token ID to bias */
 	float		bias;			/* Bias value */
-}	t_fluid_bias_entry;
+}	t_fluid_v1_bias_entry;
+
+/*
+** v2 save options (passed to fluid_save_v2)
+*/
+typedef struct s_fluid_save_opts
+{
+	const char	*domain;		/* e.g., "coding", "law" */
+	const char	*author;		/* e.g., "42-Berlin-Engine" */
+	const char	*description;	/* Human-readable description */
+	uint64_t	base_model_hash;	/* XXHash of base model (0 = skip check) */
+}	t_fluid_save_opts;
 
 /*
 ** Save the current fluid state (learned weights + biases) to a file.
-** Only non-zero entries are saved (sparse format).
+** Uses Fluid Protocol v2 format with full metadata.
 **
 ** @param t: Transformer with learned state
 ** @param path: Output file path (e.g., "brain.fluid")
+** @param opts: Optional metadata (can be NULL for defaults)
 ** @return: 0 on success, -1 on error
+*/
+int		fluid_save_v2(struct s_transformer *t, const char *path,
+			const t_fluid_save_opts *opts);
+
+/*
+** Legacy save function (writes v2 with default metadata)
 */
 int		fluid_save(struct s_transformer *t, const char *path);
 
 /*
 ** Load fluid state from a file and merge into current model.
-** Validates model dimensions before loading.
+** Auto-detects v1 vs v2 format.
 **
 ** @param t: Transformer to load state into
 ** @param path: Input file path

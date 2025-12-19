@@ -1,0 +1,413 @@
+make: Entering directory '/home/nix/42-Berlin-Engine/tests'
+gcc -Wall -Wextra -g -O0 -march=native -mavx2 -mfma -I../src -I. -o test_arena unit/test_arena.c ../src/memory/arena.c ../src/memory/kv_cache.c ../src/memory/kv_cache_evict.c ../src/memory/kv_cache_score.c ../src/memory/paged.c ../src/tensor/tensor.c ../src/loader/loader.c ../src/loader/loader_parse.c ../src/loader/loader_io.c ../src/loader/loader_vision.c ../src/compute/ops_matmul.c ../src/compute/ops_norm.c ../src/compute/ops_rope.c ../src/compute/ops_topk.c ../src/compute/ops_lightning.c ../src/compute/ops_simd.c ../src/compute/ops_lsh.c ../src/compute/ops_silu.c ../src/compute/ops_activation.c ../src/compute/ops_attention.c ../src/compute/ops_quant.c ../src/compute/gemm_kernel.c ../src/compute/gemm.c ../src/compute/sampler.c ../src/compute/sampler_temp.c ../src/compute/sampler_topp.c ../src/nested/fluid.c ../src/nested/fluid_backward.c ../src/nested/backward.c ../src/nested/optimizer.c ../src/nested/persistence.c ../src/fluid/fluid_io.c ../src/tokenizer/tokenizer.c ../src/inference/inference.c ../src/inference/model.c -lm -fopenmp
+gcc -Wall -Wextra -g -O0 -march=native -mavx2 -mfma -I../src -I. -o test_tensor unit/test_tensor.c ../src/memory/arena.c ../src/memory/kv_cache.c ../src/memory/kv_cache_evict.c ../src/memory/kv_cache_score.c ../src/memory/paged.c ../src/tensor/tensor.c ../src/loader/loader.c ../src/loader/loader_parse.c ../src/loader/loader_io.c ../src/loader/loader_vision.c ../src/compute/ops_matmul.c ../src/compute/ops_norm.c ../src/compute/ops_rope.c ../src/compute/ops_topk.c ../src/compute/ops_lightning.c ../src/compute/ops_simd.c ../src/compute/ops_lsh.c ../src/compute/ops_silu.c ../src/compute/ops_activation.c ../src/compute/ops_attention.c ../src/compute/ops_quant.c ../src/compute/gemm_kernel.c ../src/compute/gemm.c ../src/compute/sampler.c ../src/compute/sampler_temp.c ../src/compute/sampler_topp.c ../src/nested/fluid.c ../src/nested/fluid_backward.c ../src/nested/backward.c ../src/nested/optimizer.c ../src/nested/persistence.c ../src/fluid/fluid_io.c ../src/tokenizer/tokenizer.c ../src/inference/inference.c ../src/inference/model.c -lm -fopenmp
+gcc -Wall -Wextra -g -O0 -march=native -mavx2 -mfma -I../src -I. -o test_ops unit/test_ops.c ../src/memory/arena.c ../src/memory/kv_cache.c ../src/memory/kv_cache_evict.c ../src/memory/kv_cache_score.c ../src/memory/paged.c ../src/tensor/tensor.c ../src/loader/loader.c ../src/loader/loader_parse.c ../src/loader/loader_io.c ../src/loader/loader_vision.c ../src/compute/ops_matmul.c ../src/compute/ops_norm.c ../src/compute/ops_rope.c ../src/compute/ops_topk.c ../src/compute/ops_lightning.c ../src/compute/ops_simd.c ../src/compute/ops_lsh.c ../src/compute/ops_silu.c ../src/compute/ops_activation.c ../src/compute/ops_attention.c ../src/compute/ops_quant.c ../src/compute/gemm_kernel.c ../src/compute/gemm.c ../src/compute/sampler.c ../src/compute/sampler_temp.c ../src/compute/sampler_topp.c ../src/nested/fluid.c ../src/nested/fluid_backward.c ../src/nested/backward.c ../src/nested/optimizer.c ../src/nested/persistence.c ../src/fluid/fluid_io.c ../src/tokenizer/tokenizer.c ../src/inference/inference.c ../src/inference/model.c -lm -fopenmp
+gcc -Wall -Wextra -g -O0 -march=native -mavx2 -mfma -I../src -I. -o test_loader unit/test_loader.c ../src/memory/arena.c ../src/memory/kv_cache.c ../src/memory/kv_cache_evict.c ../src/memory/kv_cache_score.c ../src/memory/paged.c ../src/tensor/tensor.c ../src/loader/loader.c ../src/loader/loader_parse.c ../src/loader/loader_io.c ../src/loader/loader_vision.c ../src/compute/ops_matmul.c ../src/compute/ops_norm.c ../src/compute/ops_rope.c ../src/compute/ops_topk.c ../src/compute/ops_lightning.c ../src/compute/ops_simd.c ../src/compute/ops_lsh.c ../src/compute/ops_silu.c ../src/compute/ops_activation.c ../src/compute/ops_attention.c ../src/compute/ops_quant.c ../src/compute/gemm_kernel.c ../src/compute/gemm.c ../src/compute/sampler.c ../src/compute/sampler_temp.c ../src/compute/sampler_topp.c ../src/nested/fluid.c ../src/nested/fluid_backward.c ../src/nested/backward.c ../src/nested/optimizer.c ../src/nested/persistence.c ../src/fluid/fluid_io.c ../src/tokenizer/tokenizer.c ../src/inference/inference.c ../src/inference/model.c -lm -fopenmp
+gcc -Wall -Wextra -g -O0 -march=native -mavx2 -mfma -I../src -I. -o test_kv_cache unit/test_kv_cache.c ../src/memory/arena.c ../src/memory/kv_cache.c ../src/memory/kv_cache_evict.c ../src/memory/kv_cache_score.c ../src/memory/paged.c ../src/tensor/tensor.c ../src/loader/loader.c ../src/loader/loader_parse.c ../src/loader/loader_io.c ../src/loader/loader_vision.c ../src/compute/ops_matmul.c ../src/compute/ops_norm.c ../src/compute/ops_rope.c ../src/compute/ops_topk.c ../src/compute/ops_lightning.c ../src/compute/ops_simd.c ../src/compute/ops_lsh.c ../src/compute/ops_silu.c ../src/compute/ops_activation.c ../src/compute/ops_attention.c ../src/compute/ops_quant.c ../src/compute/gemm_kernel.c ../src/compute/gemm.c ../src/compute/sampler.c ../src/compute/sampler_temp.c ../src/compute/sampler_topp.c ../src/nested/fluid.c ../src/nested/fluid_backward.c ../src/nested/backward.c ../src/nested/optimizer.c ../src/nested/persistence.c ../src/fluid/fluid_io.c ../src/tokenizer/tokenizer.c ../src/inference/inference.c ../src/inference/model.c -lm -fopenmp
+gcc -Wall -Wextra -g -O0 -march=native -mavx2 -mfma -I../src -I. -o test_fluid unit/test_fluid.c ../src/memory/arena.c ../src/memory/kv_cache.c ../src/memory/kv_cache_evict.c ../src/memory/kv_cache_score.c ../src/memory/paged.c ../src/tensor/tensor.c ../src/loader/loader.c ../src/loader/loader_parse.c ../src/loader/loader_io.c ../src/loader/loader_vision.c ../src/compute/ops_matmul.c ../src/compute/ops_norm.c ../src/compute/ops_rope.c ../src/compute/ops_topk.c ../src/compute/ops_lightning.c ../src/compute/ops_simd.c ../src/compute/ops_lsh.c ../src/compute/ops_silu.c ../src/compute/ops_activation.c ../src/compute/ops_attention.c ../src/compute/ops_quant.c ../src/compute/gemm_kernel.c ../src/compute/gemm.c ../src/compute/sampler.c ../src/compute/sampler_temp.c ../src/compute/sampler_topp.c ../src/nested/fluid.c ../src/nested/fluid_backward.c ../src/nested/backward.c ../src/nested/optimizer.c ../src/nested/persistence.c ../src/fluid/fluid_io.c ../src/tokenizer/tokenizer.c ../src/inference/inference.c ../src/inference/model.c -lm -fopenmp
+gcc -Wall -Wextra -g -O0 -march=native -mavx2 -mfma -I../src -I. -o test_tokenizer unit/test_tokenizer.c ../src/memory/arena.c ../src/memory/kv_cache.c ../src/memory/kv_cache_evict.c ../src/memory/kv_cache_score.c ../src/memory/paged.c ../src/tensor/tensor.c ../src/loader/loader.c ../src/loader/loader_parse.c ../src/loader/loader_io.c ../src/loader/loader_vision.c ../src/compute/ops_matmul.c ../src/compute/ops_norm.c ../src/compute/ops_rope.c ../src/compute/ops_topk.c ../src/compute/ops_lightning.c ../src/compute/ops_simd.c ../src/compute/ops_lsh.c ../src/compute/ops_silu.c ../src/compute/ops_activation.c ../src/compute/ops_attention.c ../src/compute/ops_quant.c ../src/compute/gemm_kernel.c ../src/compute/gemm.c ../src/compute/sampler.c ../src/compute/sampler_temp.c ../src/compute/sampler_topp.c ../src/nested/fluid.c ../src/nested/fluid_backward.c ../src/nested/backward.c ../src/nested/optimizer.c ../src/nested/persistence.c ../src/fluid/fluid_io.c ../src/tokenizer/tokenizer.c ../src/inference/inference.c ../src/inference/model.c -lm -fopenmp
+gcc -Wall -Wextra -g -O0 -march=native -mavx2 -mfma -I../src -I. -o test_concurrency unit/test_concurrency.c ../src/memory/arena.c ../src/memory/kv_cache.c ../src/memory/kv_cache_evict.c ../src/memory/kv_cache_score.c ../src/memory/paged.c ../src/tensor/tensor.c ../src/loader/loader.c ../src/loader/loader_parse.c ../src/loader/loader_io.c ../src/loader/loader_vision.c ../src/compute/ops_matmul.c ../src/compute/ops_norm.c ../src/compute/ops_rope.c ../src/compute/ops_topk.c ../src/compute/ops_lightning.c ../src/compute/ops_simd.c ../src/compute/ops_lsh.c ../src/compute/ops_silu.c ../src/compute/ops_activation.c ../src/compute/ops_attention.c ../src/compute/ops_quant.c ../src/compute/gemm_kernel.c ../src/compute/gemm.c ../src/compute/sampler.c ../src/compute/sampler_temp.c ../src/compute/sampler_topp.c ../src/nested/fluid.c ../src/nested/fluid_backward.c ../src/nested/backward.c ../src/nested/optimizer.c ../src/nested/persistence.c ../src/fluid/fluid_io.c ../src/tokenizer/tokenizer.c ../src/inference/inference.c ../src/inference/model.c -lm -fopenmp
+gcc -Wall -Wextra -g -O0 -march=native -mavx2 -mfma -I../src -I. -o test_silu unit/test_silu.c ../src/memory/arena.c ../src/memory/kv_cache.c ../src/memory/kv_cache_evict.c ../src/memory/kv_cache_score.c ../src/memory/paged.c ../src/tensor/tensor.c ../src/loader/loader.c ../src/loader/loader_parse.c ../src/loader/loader_io.c ../src/loader/loader_vision.c ../src/compute/ops_matmul.c ../src/compute/ops_norm.c ../src/compute/ops_rope.c ../src/compute/ops_topk.c ../src/compute/ops_lightning.c ../src/compute/ops_simd.c ../src/compute/ops_lsh.c ../src/compute/ops_silu.c ../src/compute/ops_activation.c ../src/compute/ops_attention.c ../src/compute/ops_quant.c ../src/compute/gemm_kernel.c ../src/compute/gemm.c ../src/compute/sampler.c ../src/compute/sampler_temp.c ../src/compute/sampler_topp.c ../src/nested/fluid.c ../src/nested/fluid_backward.c ../src/nested/backward.c ../src/nested/optimizer.c ../src/nested/persistence.c ../src/fluid/fluid_io.c ../src/tokenizer/tokenizer.c ../src/inference/inference.c ../src/inference/model.c -lm -fopenmp
+gcc -Wall -Wextra -g -O0 -march=native -mavx2 -mfma -I../src -I. -o test_simd unit/test_simd.c ../src/memory/arena.c ../src/memory/kv_cache.c ../src/memory/kv_cache_evict.c ../src/memory/kv_cache_score.c ../src/memory/paged.c ../src/tensor/tensor.c ../src/loader/loader.c ../src/loader/loader_parse.c ../src/loader/loader_io.c ../src/loader/loader_vision.c ../src/compute/ops_matmul.c ../src/compute/ops_norm.c ../src/compute/ops_rope.c ../src/compute/ops_topk.c ../src/compute/ops_lightning.c ../src/compute/ops_simd.c ../src/compute/ops_lsh.c ../src/compute/ops_silu.c ../src/compute/ops_activation.c ../src/compute/ops_attention.c ../src/compute/ops_quant.c ../src/compute/gemm_kernel.c ../src/compute/gemm.c ../src/compute/sampler.c ../src/compute/sampler_temp.c ../src/compute/sampler_topp.c ../src/nested/fluid.c ../src/nested/fluid_backward.c ../src/nested/backward.c ../src/nested/optimizer.c ../src/nested/persistence.c ../src/fluid/fluid_io.c ../src/tokenizer/tokenizer.c ../src/inference/inference.c ../src/inference/model.c -lm -fopenmp
+gcc -Wall -Wextra -g -O0 -march=native -mavx2 -mfma -I../src -I. -o test_integration benchmarks/test_integration.c ../src/memory/arena.c ../src/memory/kv_cache.c ../src/memory/kv_cache_evict.c ../src/memory/kv_cache_score.c ../src/memory/paged.c ../src/tensor/tensor.c ../src/loader/loader.c ../src/loader/loader_parse.c ../src/loader/loader_io.c ../src/loader/loader_vision.c ../src/compute/ops_matmul.c ../src/compute/ops_norm.c ../src/compute/ops_rope.c ../src/compute/ops_topk.c ../src/compute/ops_lightning.c ../src/compute/ops_simd.c ../src/compute/ops_lsh.c ../src/compute/ops_silu.c ../src/compute/ops_activation.c ../src/compute/ops_attention.c ../src/compute/ops_quant.c ../src/compute/gemm_kernel.c ../src/compute/gemm.c ../src/compute/sampler.c ../src/compute/sampler_temp.c ../src/compute/sampler_topp.c ../src/nested/fluid.c ../src/nested/fluid_backward.c ../src/nested/backward.c ../src/nested/optimizer.c ../src/nested/persistence.c ../src/fluid/fluid_io.c ../src/tokenizer/tokenizer.c ../src/inference/inference.c ../src/inference/model.c -lm -fopenmp
+benchmarks/test_integration.c: In function ‘test_nested_learning_loop’:
+benchmarks/test_integration.c:246:14: warning: unused variable ‘t_out’ [-Wunused-variable]
+  246 |     t_tensor t_out = tensor_view(out_buf, shape, 2);
+      |              ^~~~~
+benchmarks/test_integration.c: In function ‘test_full_inference_step’:
+benchmarks/test_integration.c:313:9: warning: unused variable ‘seq_len’ [-Wunused-variable]
+  313 |     int seq_len = 8;
+      |         ^~~~~~~
+gcc -Wall -Wextra -g -O0 -march=native -mavx2 -mfma -I../src -I. -o test_stress benchmarks/test_stress.c ../src/memory/arena.c ../src/memory/kv_cache.c ../src/memory/kv_cache_evict.c ../src/memory/kv_cache_score.c ../src/memory/paged.c ../src/tensor/tensor.c ../src/loader/loader.c ../src/loader/loader_parse.c ../src/loader/loader_io.c ../src/loader/loader_vision.c ../src/compute/ops_matmul.c ../src/compute/ops_norm.c ../src/compute/ops_rope.c ../src/compute/ops_topk.c ../src/compute/ops_lightning.c ../src/compute/ops_simd.c ../src/compute/ops_lsh.c ../src/compute/ops_silu.c ../src/compute/ops_activation.c ../src/compute/ops_attention.c ../src/compute/ops_quant.c ../src/compute/gemm_kernel.c ../src/compute/gemm.c ../src/compute/sampler.c ../src/compute/sampler_temp.c ../src/compute/sampler_topp.c ../src/nested/fluid.c ../src/nested/fluid_backward.c ../src/nested/backward.c ../src/nested/optimizer.c ../src/nested/persistence.c ../src/fluid/fluid_io.c ../src/tokenizer/tokenizer.c ../src/inference/inference.c ../src/inference/model.c -lm -fopenmp
+gcc -Wall -Wextra -g -O0 -march=native -mavx2 -mfma -I../src -I. -o test_learning benchmarks/test_learning.c ../src/memory/arena.c ../src/memory/kv_cache.c ../src/memory/kv_cache_evict.c ../src/memory/kv_cache_score.c ../src/memory/paged.c ../src/tensor/tensor.c ../src/loader/loader.c ../src/loader/loader_parse.c ../src/loader/loader_io.c ../src/loader/loader_vision.c ../src/compute/ops_matmul.c ../src/compute/ops_norm.c ../src/compute/ops_rope.c ../src/compute/ops_topk.c ../src/compute/ops_lightning.c ../src/compute/ops_simd.c ../src/compute/ops_lsh.c ../src/compute/ops_silu.c ../src/compute/ops_activation.c ../src/compute/ops_attention.c ../src/compute/ops_quant.c ../src/compute/gemm_kernel.c ../src/compute/gemm.c ../src/compute/sampler.c ../src/compute/sampler_temp.c ../src/compute/sampler_topp.c ../src/nested/fluid.c ../src/nested/fluid_backward.c ../src/nested/backward.c ../src/nested/optimizer.c ../src/nested/persistence.c ../src/fluid/fluid_io.c ../src/tokenizer/tokenizer.c ../src/inference/inference.c ../src/inference/model.c -lm -fopenmp
+gcc -Wall -Wextra -g -O0 -march=native -mavx2 -mfma -I../src -I. -o test_gemm_large benchmarks/test_gemm_large.c ../src/memory/arena.c ../src/memory/kv_cache.c ../src/memory/kv_cache_evict.c ../src/memory/kv_cache_score.c ../src/memory/paged.c ../src/tensor/tensor.c ../src/loader/loader.c ../src/loader/loader_parse.c ../src/loader/loader_io.c ../src/loader/loader_vision.c ../src/compute/ops_matmul.c ../src/compute/ops_norm.c ../src/compute/ops_rope.c ../src/compute/ops_topk.c ../src/compute/ops_lightning.c ../src/compute/ops_simd.c ../src/compute/ops_lsh.c ../src/compute/ops_silu.c ../src/compute/ops_activation.c ../src/compute/ops_attention.c ../src/compute/ops_quant.c ../src/compute/gemm_kernel.c ../src/compute/gemm.c ../src/compute/sampler.c ../src/compute/sampler_temp.c ../src/compute/sampler_topp.c ../src/nested/fluid.c ../src/nested/fluid_backward.c ../src/nested/backward.c ../src/nested/optimizer.c ../src/nested/persistence.c ../src/fluid/fluid_io.c ../src/tokenizer/tokenizer.c ../src/inference/inference.c ../src/inference/model.c -lm -fopenmp
+benchmarks/test_gemm_large.c: In function ‘main’:
+benchmarks/test_gemm_large.c:67:25: warning: unused variable ‘gflops_naive’ [-Wunused-variable]
+   67 |         double          gflops_naive;
+      |                         ^~~~~~~~~~~~
+benchmarks/test_gemm_large.c:64:25: warning: unused variable ‘time_naive’ [-Wunused-variable]
+   64 |         double          time_naive;
+      |                         ^~~~~~~~~~
+
+[1;32m✓ All test binaries built successfully[0m
+
+
+[1;36m════════════════════════════════════════════════════════[0m
+[1;36m  RUNNING FULL TEST SUITE[0m
+[1;36m════════════════════════════════════════════════════════[0m
+
+
+[1m[36m═══════════════════════════════════════════
+ TEST SUITE: t_arena Allocator
+═══════════════════════════════════════════[0m
+
+[33m▶ [0mt_arena Initialization ... [32m[PASS][0m
+[33m▶ [0mSimple Allocation ... [32m[PASS][0m
+[33m▶ [0m64-Byte Alignment ... [32m[PASS][0m
+[33m▶ [0mMultiple Allocations ... [32m[PASS][0m
+[33m▶ [0mReset Functionality ... [32m[PASS][0m
+[33m▶ [0mZero-Fill Guarantee ... [32m[PASS][0m
+[33m▶ [0mFree Clears State ... [32m[PASS][0m
+[33m▶ [0mLarge Allocation (1MB) ... [32m[PASS][0m
+[33m▶ [0mContiguous Allocations (Cache-Friendly) ... [32m[PASS][0m
+[33m▶ [0mStress: 1000 Small Allocations ... [32m[PASS][0m
+
+[1m───────────────────────────────────────────
+ RESULTS: [32mALL 10 TESTS PASSED ✓[0m
+[1m───────────────────────────────────────────[0m
+
+
+
+[1m[36m═══════════════════════════════════════════
+ TEST SUITE: t_tensor & BF16
+═══════════════════════════════════════════[0m
+
+[33m▶ [0mBF16 Round-Trip Conversion ... [32m[PASS][0m
+[33m▶ [0mBF16 Zero Values ... [32m[PASS][0m
+[33m▶ [0mBF16 Infinity Handling ... [32m[PASS][0m
+[33m▶ [0mBF16 NaN Handling ... [32m[PASS][0m
+[33m▶ [0mBF16 Precision (3 significant digits) ...     [34mℹ [0ma=1.000000 -> bf16=0x3f80
+    [34mℹ [0mb=1.001000 -> bf16=0x3f80
+    [34mℹ [0mc=1.010000 -> bf16=0x3f81
+[32m[PASS][0m
+[33m▶ [0mBF16 Specific Known Values ... [32m[PASS][0m
+[33m▶ [0mt_tensor View 1D ... [32m[PASS][0m
+[33m▶ [0mt_tensor View 2D ... [32m[PASS][0m
+[33m▶ [0mt_tensor View 3D ... [32m[PASS][0m
+[33m▶ [0mt_tensor View 4D (Batch, Head, Seq, Dim) ... [32m[PASS][0m
+[33m▶ [0mt_tensor Data Read/Write ... [32m[PASS][0m
+[33m▶ [0mLarge t_tensor (4096 elements) ... [32m[PASS][0m
+
+[1m───────────────────────────────────────────
+ RESULTS: [32mALL 12 TESTS PASSED ✓[0m
+[1m───────────────────────────────────────────[0m
+
+
+
+[1m[36m═══════════════════════════════════════════
+ TEST SUITE: Compute Operations
+═══════════════════════════════════════════[0m
+
+[33m▶ [0mRMSNorm Basic ... RMSNorm unsupported dtypes
+
+    [31m✗ ASSERT_NEAR failed:[0m
+      Expected: 0.365148365
+      Actual:   9.18354962e-41
+      Delta:    0.365148365 (tolerance: 0.00999999978)
+      at unit/test_ops.c:47
+    [31m✗ ASSERT_NEAR failed:[0m
+      Expected: 0.730296731
+      Actual:   0
+      Delta:    0.730296731 (tolerance: 0.00999999978)
+      at unit/test_ops.c:48
+    [31m✗ ASSERT_NEAR failed:[0m
+      Expected: 1.09544504
+      Actual:   0
+      Delta:    1.09544504 (tolerance: 0.00999999978)
+      at unit/test_ops.c:49
+    [31m✗ ASSERT_NEAR failed:[0m
+      Expected: 1.46059346
+      Actual:   0
+      Delta:    1.46059346 (tolerance: 0.00999999978)
+      at unit/test_ops.c:50
+[31m[FAIL][0m
+[33m▶ [0mRMSNorm with Weights ... RMSNorm unsupported dtypes
+
+    [31m✗ ASSERT_NEAR failed:[0m
+      Expected: 0.730296731
+      Actual:   9.18354962e-41
+      Delta:    0.730296731 (tolerance: 0.0500000007)
+      at unit/test_ops.c:74
+    [31m✗ ASSERT_NEAR failed:[0m
+      Expected: 2.92118692
+      Actual:   0
+      Delta:    2.92118692 (tolerance: 0.0500000007)
+      at unit/test_ops.c:75
+[31m[FAIL][0m
+[33m▶ [0mRMSNorm Zero Input (epsilon safety) ... RMSNorm unsupported dtypes
+[32m[PASS][0m
+[33m▶ [0mRoPE Position 0 (No Rotation) ... op_rope: pos=0, head_dim=4, num_vecs=1, dtype=1
+[32m[PASS][0m
+[33m▶ [0mRoPE Position 1 (With Rotation) ... op_rope: pos=1, head_dim=4, num_vecs=1, dtype=1
+
+    [31m✗ ASSERT_NEAR failed:[0m
+      Expected: 0.540302277
+      Actual:   -0.30078125
+      Delta:    0.841083527 (tolerance: 0.00999999978)
+      at unit/test_ops.c:160
+    [31m✗ ASSERT_NEAR failed:[0m
+      Expected: 0.841470957
+      Actual:   0
+      Delta:    0.841470957 (tolerance: 0.00999999978)
+      at unit/test_ops.c:161
+[31m[FAIL][0m
+[33m▶ [0mMatMul with Identity ... [32m[PASS][0m
+[33m▶ [0mMatMul General [2x3] x [3x2] ... [32m[PASS][0m
+[33m▶ [0mLightning Indexer Score ... [32m[PASS][0m
+[33m▶ [0mLightning Indexer ReLU (Negative Dot) ... [32m[PASS][0m
+[33m▶ [0mTop-K Selection (K=2) ... [32m[PASS][0m
+[33m▶ [0mTop-K (K > N) ... [32m[PASS][0m
+[33m▶ [0mSiLU Activation ... 
+    [31m✗ ASSERT_NEAR failed:[0m
+      Expected: 1.76159406
+      Actual:   1.75
+      Delta:    0.0115940571 (tolerance: 0.00999999978)
+      at unit/test_ops.c:373
+[31m[FAIL][0m
+[33m▶ [0mSwiGLU (SiLU * Val) ... [32m[PASS][0m
+
+[1m───────────────────────────────────────────
+ RESULTS: [31m4 FAILED[0m, [32m9 PASSED[0m (of 13)
+[1m───────────────────────────────────────────[0m
+
+
+
+[1m[36m═══════════════════════════════════════════
+ TEST SUITE: SafeTensors Loader
+═══════════════════════════════════════════[0m
+
+[33m▶ [0mLoad Valid SafeTensors ... [32m[PASS][0m
+[33m▶ [0mGet t_tensor by Name ... [32m[PASS][0m
+[33m▶ [0mGet Non-Existent t_tensor ... WARN: Tensor not found: fake_tensor
+[32m[PASS][0m
+[33m▶ [0mLoad Missing File (Error Handling) ... open: No such file or directory
+[32m[PASS][0m
+[33m▶ [0mMultiple Tensors in File ... [32m[PASS][0m
+[33m▶ [0m1D t_tensor Loading ... [32m[PASS][0m
+[33m▶ [0m3D t_tensor Loading ... [32m[PASS][0m
+[33m▶ [0mFree t_model (Double-Free Safety) ... [32m[PASS][0m
+
+[1m───────────────────────────────────────────
+ RESULTS: [32mALL 8 TESTS PASSED ✓[0m
+[1m───────────────────────────────────────────[0m
+
+
+
+[1m[36m═══════════════════════════════════════════
+ TEST SUITE: KV Cache
+═══════════════════════════════════════════[0m
+
+[33m▶ [0mKV Cache Initialization ... [32m[PASS][0m
+[33m▶ [0mKV Cache Append ... [32m[PASS][0m
+[33m▶ [0mKV Cache Multiple Appends ... [32m[PASS][0m
+[33m▶ [0mKV Cache Full (No Overflow) ... KV Cache Full!
+[32m[PASS][0m
+[33m▶ [0mKV Cache Eviction (Keep Top-2) ... [32m[PASS][0m
+[33m▶ [0mKV Cache Eviction (Keep >= Current) ... [32m[PASS][0m
+[33m▶ [0mKV Cache Multi-Head ... [32m[PASS][0m
+[33m▶ [0mKV Cache V Integrity After Eviction ... [32m[PASS][0m
+
+[1m───────────────────────────────────────────
+ RESULTS: [32mALL 8 TESTS PASSED ✓[0m
+[1m───────────────────────────────────────────[0m
+
+
+
+[1m[36m═══════════════════════════════════════════
+ TEST SUITE: Nested Learning (Fluid Weights)
+═══════════════════════════════════════════[0m
+
+[33m▶ [0mBackward Linear Basic ... [32m[PASS][0m
+[33m▶ [0mSGD Optimizer Basic ... [32m[PASS][0m
+[33m▶ [0mFull Backward + SGD Pipeline ... [32m[PASS][0m
+[33m▶ [0mSGD with Zero Gradient ... [32m[PASS][0m
+[33m▶ [0mSGD with Large Learning Rate ... 
+    [31m✗ ASSERT_NEAR failed:[0m
+      Expected: 0
+      Actual:   0.5
+      Delta:    0.5 (tolerance: 0.00999999978)
+      at unit/test_fluid.c:180
+    [31m✗ ASSERT_NEAR failed:[0m
+      Expected: 2
+      Actual:   1.5
+      Delta:    0.5 (tolerance: 0.00999999978)
+      at unit/test_fluid.c:181
+[31m[FAIL][0m
+[33m▶ [0mSGD Convergence (Multiple Steps) ...     [34mℹ [0mFinal w after 20 steps: 1.8359 (target: 2.0)
+
+    [31m✗ ASSERT_NEAR failed:[0m
+      Expected: 2
+      Actual:   1.8359375
+      Delta:    0.1640625 (tolerance: 0.100000001)
+      at unit/test_fluid.c:222
+[31m[FAIL][0m
+[33m▶ [0mBackward Linear [2x3] x [3x2] ... [32m[PASS][0m
+
+[1m───────────────────────────────────────────
+ RESULTS: [31m2 FAILED[0m, [32m5 PASSED[0m (of 7)
+[1m───────────────────────────────────────────[0m
+
+
+Failed to load tokenizer
+Loading tokenizer from Ministral-Stuff/tokenizer.json...
+
+=== CAS Atomic Counter Stress Test ===
+Threads: 100
+Iterations/thread: 10000
+Expected total steps: 1000000
+
+Starting 100 threads...
+
+=== Results ===
+Final step count:     1000000 (expected: 1000000)
+Final skipped count:  500000 (expected: 500000)
+Actual steps (learned): 0
+
+✅ PASS: All counters consistent!
+   CAS-based atomic updates are working correctly.
+   No torn reads or lost updates detected.
+
+=== Fused SiLU-Mul Benchmark (Phase 6) ===
+Array size: 1179648 (hidden_dim=9216 x batch=128)
+Iterations: 1000
+
+Max absolute difference: 0.017242
+✅ Correctness: Results match (diff < 0.01)
+   (Small diff expected from fast_expf approximation)
+
+=== Performance ===
+Naive (expf):  8434.88 ms total (8.435 ms/iter)
+Fused (AVX2):  5244.01 ms total (5.244 ms/iter)
+
+Speedup: 1.61x
+⚠️  Good (1.5-3x speedup)
+
+Throughput:
+  Naive: 139.85 M elements/sec
+  Fused: 224.95 M elements/sec
+
+=== SIMD Sum-of-Squares Benchmark ===
+Array size: 1000000 floats (3.81 MB)
+Iterations: 100
+
+=== Results ===
+Scalar sum_sq: 8329386.000000 (257.13 ms total, 2.571 ms/iter)
+SIMD sum_sq:   8333361.000000 (23.53 ms total, 0.235 ms/iter)
+
+✅ Correctness: Results match (relative error < 0.1%)
+   (Small diff expected from parallel FP accumulation order)
+
+=== Performance ===
+Speedup: 10.93x
+✅ Target met (>= 4x speedup)
+
+Throughput:
+  Scalar: 0.78 GFlops
+  SIMD:   8.50 GFlops
+
+
+[1m[36m═══════════════════════════════════════════
+ TEST SUITE: Integration Tests
+═══════════════════════════════════════════[0m
+
+[33m▶ [0mt_arena + t_tensor Integration ... [32m[PASS][0m
+[33m▶ [0mSimple Forward Pass ... RMSNorm unsupported dtypes
+
+    [31m✗ ASSERT_NEAR failed:[0m
+      Expected: 1
+      Actual:   0
+      Delta:    1 (tolerance: 0.100000001)
+      at benchmarks/test_integration.c:100
+[31m[FAIL][0m
+[33m▶ [0mKV Cache Eviction Pipeline ... [32m[PASS][0m
+[33m▶ [0mSparse Attention Flow (Lightning + TopK) ... [32m[PASS][0m
+[33m▶ [0mNested Learning Training Loop ...     [34mℹ [0mFinal weight after 10 steps: 0.9961 (target: 1.0)
+[32m[PASS][0m
+[33m▶ [0mArgmax Sampler Integration ... [32m[PASS][0m
+[33m▶ [0mFull Inference Step Simulation ... RMSNorm unsupported dtypes
+RMSNorm unsupported dtypes
+RMSNorm unsupported dtypes
+op_rope: pos=0, head_dim=4, num_vecs=2, dtype=1
+op_rope: pos=1, head_dim=4, num_vecs=2, dtype=1
+op_rope: pos=2, head_dim=4, num_vecs=2, dtype=1
+    [34mℹ [0mProcessed 3 tokens, cache seq_len = 3
+[32m[PASS][0m
+
+[1m───────────────────────────────────────────
+ RESULTS: [31m1 FAILED[0m, [32m6 PASSED[0m (of 7)
+[1m───────────────────────────────────────────[0m
+
+
+
+[1m[36m═══════════════════════════════════════════
+ TEST SUITE: Stress Tests
+═══════════════════════════════════════════[0m
+
+[33m▶ [0mStress: Large t_arena (256MB) ...     [34mℹ [0mAllocated 100 x 2MB chunks = 200MB
+[32m[PASS][0m
+[33m▶ [0mStress: 10000 Small Allocations ...     [34mℹ [0mSuccessfully allocated 10000 x 64 bytes
+[32m[PASS][0m
+[33m▶ [0mStress: Large MatMul [256x256] x [256x256] ...     [34mℹ [0mMatMul completed in 85.62 ms
+[32m[PASS][0m
+[33m▶ [0mStress: Top-K on 10000 Elements ...     [34mℹ [0mTop-100 selection from 10000 elements in 0.12 ms
+
+    [31m✗ ASSERT_EQ failed:[0m
+      Expected: 99
+      Actual:   49
+      at benchmarks/test_stress.c:153
+[31m[FAIL][0m
+[33m▶ [0mStress: KV Cache Eviction Cycles ...     [34mℹ [0mCompleted 10 eviction cycles, final seq_len = 50
+[32m[PASS][0m
+[33m▶ [0mStress: RMSNorm Batch [128 x 512] ... RMSNorm unsupported dtypes
+    [34mℹ [0mRMSNorm on [128 x 512] completed in 0.02 ms
+
+    [31m✗ ASSERT_NEAR failed:[0m
+      Expected: 1
+      Actual:   0
+      Delta:    1 (tolerance: 0.200000003)
+      at benchmarks/test_stress.c:276
+[31m[FAIL][0m
+[33m▶ [0mStress: RoPE at Positions 0-1000 ... op_rope: pos=0, head_dim=64, num_vecs=1, dtype=1
+op_rope: pos=100, head_dim=64, num_vecs=1, dtype=1
+op_rope: pos=200, head_dim=64, num_vecs=1, dtype=1
+op_rope: pos=300, head_dim=64, num_vecs=1, dtype=1
+op_rope: pos=400, head_dim=64, num_vecs=1, dtype=1
+op_rope: pos=500, head_dim=64, num_vecs=1, dtype=1
+op_rope: pos=600, head_dim=64, num_vecs=1, dtype=1
+op_rope: pos=700, head_dim=64, num_vecs=1, dtype=1
+op_rope: pos=800, head_dim=64, num_vecs=1, dtype=1
+op_rope: pos=900, head_dim=64, num_vecs=1, dtype=1
+    [34mℹ [0mRoPE tested at positions 0, 100, 200, ..., 900
+[32m[PASS][0m
+[33m▶ [0mStress: t_arena Reset Cycles ...     [34mℹ [0mCompleted 100 arena reset cycles
+[32m[PASS][0m
+[33m▶ [0mStress: BF16 Edge Cases ...     [34mℹ [0mTested 3000 BF16 edge cases
+[32m[PASS][0m
+
+[1m───────────────────────────────────────────
+ RESULTS: [31m2 FAILED[0m, [32m7 PASSED[0m (of 9)
+[1m───────────────────────────────────────────[0m
+
+
+=== Nested Learning Overfitting Test (Phase 7) ===
+
+Usage: ./test_learning <model.safetensors> <config.json> <tokenizer.json>
+
+=== Large Matrix GEMM Benchmark (Phase 5) ===
+Matrix A: [128 x 4096] (BF16) = 1.00 MB
+Matrix B: [4096 x 4096] (BF16) = 32.00 MB
+Matrix C: [128 x 4096] (F32) = 2.00 MB
+Iterations: 3
+FLOPs per GEMM: 4.29 billion
+
+Initializing matrices...
+Running tiled GEMM...
+Computing reference (first 16 cols only for speed)...
+Max absolute diff (row 0, cols 0-15): 0.000000
+Relative error: 0.000000%
+✅ Correctness: Results match (within BF16 precision)
+
+=== Performance ===
+Tiled GEMM: 632.45 ms total (210.82 ms/iter)
+Throughput: 20.37 GFlops
+
+Efficiency estimate:
+  Achieved: 20.37 GFlops
+  vs Phase 4 microkernel: 78.83 GFlops (small matrix)
+  ⚠️  Moderate efficiency (15-30 GFlops)
+
+[1;36m════════════════════════════════════════════════════════[0m
+[1;31m  6 TEST SUITE(S) FAILED[0m
+[1;36m════════════════════════════════════════════════════════[0m
+make: *** [Makefile:96: test] Error 6
+make: Leaving directory '/home/nix/42-Berlin-Engine/tests'

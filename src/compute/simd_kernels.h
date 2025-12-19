@@ -92,6 +92,7 @@ static inline float	simd_hsum_512(__m512 v)
 ** Returns scalar float
 ** AVX-512: processes 16 elements per iteration (2x throughput)
 ** AVX2: processes 8 elements per iteration
+** [PERF] Added prefetch hints for improved memory bandwidth
 */
 static inline float	simd_dot_bf16_f32(const t_bf16 *a, const float *b, int n)
 {
@@ -104,6 +105,9 @@ static inline float	simd_dot_bf16_f32(const t_bf16 *a, const float *b, int n)
 	i = 0;
 	while (i + 15 < n)
 	{
+		/* [PERF] Prefetch next cache lines */
+		_mm_prefetch((const char *)(a + i + 64), _MM_HINT_T0);
+		_mm_prefetch((const char *)(b + i + 64), _MM_HINT_T0);
 		/* Load 16x BF16 (256 bits) */
 		__m256i bf16_256 = _mm256_loadu_si256((__m256i *)(a + i));
 		/* Expand to 16x 32-bit and shift to F32 position */
@@ -130,6 +134,9 @@ static inline float	simd_dot_bf16_f32(const t_bf16 *a, const float *b, int n)
 	__m256	sum_vec = _mm256_setzero_ps();
 	while (i + 7 < n)
 	{
+		/* [PERF] Prefetch ahead by 64 elements (4 cache lines) */
+		_mm_prefetch((const char *)(a + i + 64), _MM_HINT_T0);
+		_mm_prefetch((const char *)(b + i + 64), _MM_HINT_T0);
 		__m128i bf16_a = _mm_loadu_si128((__m128i *)(a + i));
 		__m256i a_32 = _mm256_cvtepu16_epi32(bf16_a);
 		__m256 a_f32 = _mm256_castsi256_ps(_mm256_slli_epi32(a_32, 16));

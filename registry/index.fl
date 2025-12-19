@@ -1,0 +1,10 @@
+# 42-Berlin-Engine Local Fluid Registry
+# Format: domain|version|base_hash|url|signature
+#
+# This is a local test registry. In production, host this on a web server.
+# =========================================================================
+
+math|1.0|0x0|file:///home/nix/42-Berlin-Engine/math.fluid|SIG_LOCAL
+code|1.0|0x0|file:///home/nix/42-Berlin-Engine/code.fluid|SIG_LOCAL
+brain_full|1.0|0x0|file:///home/nix/42-Berlin-Engine/brain_full.fluid|SIG_LOCAL
+forged_test|1.0|0x0|file:///home/nix/42-Berlin-Engine/forged_test.fluid|SIG_LOCAL

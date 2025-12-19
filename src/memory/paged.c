@@ -14,7 +14,7 @@
 #include "compute/ops_heap.h"
 #include "compute/ops_quant.h"    /* INT8/FP8 quantization (Phase 2 Deep Freeze) */
 #include "compute/simd_kernels.h"  /* simd_dot_f32_f32 for block scoring */
-#include "../safe_alloc.h"  /* xmalloc/xcalloc for safe allocation (Phase 9) */
+#include "safe_alloc.h"  /* xmalloc/xcalloc for safe allocation (Phase 9) */
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>

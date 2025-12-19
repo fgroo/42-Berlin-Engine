@@ -2,55 +2,93 @@
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-An experimental LLM inference engine implementing **DeepSeek Sparse Attention** and **Google Nested Learning**.
+An experimental LLM inference engine with **Sparse Attention**, **Nested Learning**, and a complete **Knowledge Capsule Ecosystem**.
 
-## Status
+## Quick Start
 
-**Work in Progress** ⚠️
+```bash
+# Build engine
+make
 
-Tested with **Ministral 3B Reasoning**. The engine is functional but not yet ideal — Ministral's vision capabilities sometimes cause the model to confuse itself. Ongoing improvements are being made across the board.
+# Build ecosystem tools
+make tools
+
+# Run
+./42-engine --help
+```
 
 ## Features
 
-- **Sparse Attention**: DeepSeek-style sparse attention mechanism
-- **Nested Learning**: Google's nested learning approach
-- **C Core**: Written in C for performance
+| Feature | Description |
+|---------|-------------|
+| **Sparse Attention** | LSH-based routing for O(K) complexity |
+| **Nested Learning** | Test-time training with persistent memory |
+| **Fluid Ecosystem** | Portable .fluid knowledge capsules |
+| **CPU Optimized** | AVX2/AVX-512, OpenMP parallelization |
 
----
+## Documentation
 
-*More documentation coming soon.*
+| Document | Description |
+|----------|-------------|
+| [ECOSYSTEM.md](docs/ECOSYSTEM.md) | Fluid ecosystem architecture |
+| [PROJECT_STATUS.md](docs/PROJECT_STATUS.md) | Development status & features |
+| [explanation.md](docs/explanation.md) | Technical deep-dive |
 
-## Showcase: Nested Learning (Persistent Knowledge)
+## Ecosystem Tools
 
-The engine supports **Nested Learning** with **Bigram Context Biases**, allowing the model to learn new facts during a session and recall them even after the KV cache is cleared.
-
-### Interactive Demo
 ```bash
-make chat_adaptive
-./chat_adaptive Ministral-Stuff/consolidated.safetensors Ministral-Stuff/config.json Ministral-Stuff/tokenizer.json
+# Inspect a knowledge capsule
+./fluid-info brain.fluid
+
+# Merge multiple skills
+./fluid-merge combined.fluid math.fluid code.fluid
+
+# Package manager
+./fluid-get update
+./fluid-get list
+./fluid-get install math
 ```
 
-**Commands:**
-- `LEARN <fact>` - Teach the model a new fact (5-epoch training)
-- `QUERY <text>` - Ask a question using learned biases
-- `RESET` - Clear KV cache (biases are retained)
-- `EXIT` - Quit
+## Interactive Demo
 
-**Example Session:**
-```
+```bash
+./42-engine -f brain.fluid --learn
+
 >> LEARN The secret code is 7742
-[LEARN] Done! Fact encoded in fluid weights.
-
->> RESET
-[RESET] KV cache cleared. Biases retained.
+[LEARN] Done! Fact encoded.
 
 >> QUERY The secret code is
 [ANSWER] 7742
 ```
 
-### Automated Test
+## Forge Mode (Automated Training)
+
 ```bash
-make chat_adaptive_test
-./chat_adaptive_test Ministral-Stuff/consolidated.safetensors Ministral-Stuff/config.json Ministral-Stuff/tokenizer.json
+echo "LEARN Hello World.\nFLUSH hello.fluid\nEXIT" | ./42-engine --mode forge
+```
+
+## Project Structure
+
+```
+42-Berlin-Engine/
+├── src/
+│   ├── inference/     # Core transformer
+│   ├── compute/       # SIMD kernels, LSH
+│   ├── memory/        # KV cache, arena
+│   ├── nested/        # Learning, persistence
+│   ├── fluid/         # Ecosystem: libfluid
+│   └── tools/         # Ecosystem: CLI tools
+├── docs/              # Documentation
+├── registry/          # Package index
+└── fluids/            # Installed capsules
+```
+
+## Build
+
+```bash
+make            # Optimized build
+make debug      # Debug with ASan
+make tools      # Build fluid-* tools
+make help       # Show all targets
 ```
 

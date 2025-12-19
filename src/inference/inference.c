@@ -181,7 +181,8 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 		
 		// ========== KV CACHE EVICTION ==========
 		// Auto-evict low-importance keys when cache fills up
-		if (s->kv_cache[i].current_seq_len > t->evict_threshold)
+		/* [FIX] Skip eviction if weights not allocated (OOM during init) */
+		if (s->kv_cache[i].current_seq_len > t->evict_threshold && t->evict_weights.data)
 		{
 			t_evict_params ep = {
 				.q = &q_tensor,

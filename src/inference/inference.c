@@ -77,18 +77,8 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 	uint16_t *emb_data = (uint16_t *)emb->data;
 	uint16_t *token_vec = emb_data + token * c->dim;
 	
-	// BF16 to F32 conversion (scalar - SIMD version has bug)
-	for (int i = 0; i < c->dim; i++)
-	{
-		uint32_t val = (uint32_t)token_vec[i] << 16;
-		memcpy(&s->x[i], &val, sizeof(float));
-	}
-	
-	// DEBUG: Embedding check (disabled)
-	// if (pos == 0) {
-	// 	printf("[DEBUG] Embedding for token=%d: x[0..4]=%.4f %.4f %.4f %.4f %.4f\n",
-	// 		token, s->x[0], s->x[1], s->x[2], s->x[3], s->x[4]);
-	// }
+	// [HOTFIX] Issue #5: Use SIMD for BF16→F32 conversion (was scalar)
+	simd_bf16_to_f32(s->x, token_vec, c->dim);
 
 	wrap_tensor(&x_tensor, s->x, c->dim);
 	
@@ -207,8 +197,8 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 		// then select Top-K most relevant keys.
 		// This gives O(N*K) complexity for infinite context!
 		
-		// Reset attention output buffer
-		memset(s->hb, 0, c->n_heads * c->head_dim * sizeof(float));
+		// NOTE: Attention output buffer already zeroed at layer start (line 104)
+		// to handle buffer aliasing between attention and FFN
 		
 		int kv_len = s->kv_cache[i].current_seq_len;
 		int use_sparse = (t->sparse_k > 0 && kv_len > t->sparse_k);
@@ -406,6 +396,13 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 			LSH_STATS_ADD_K_SAMPLE(&t->lsh_stats);
 		}
 		
+		/*
+		** do_attention: Label for OOM fallback from sparse attention path.
+		** SAFETY: All gotos jumping here come from within the if(use_sparse) block.
+		** Variables declared after those gotos (lsh_ctx, lsh_idx, head_dim, etc.)
+		** are only used within the sparse block and are not accessed here.
+		** This is a safe error-handling pattern - better slow (dense) than dead (OOM).
+		*/
 		do_attention:
 		// ========== FLASH ATTENTION ==========
 		// O(head_dim) memory instead of O(seq_len) for scores
@@ -565,19 +562,18 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 		t_bf16 *adapter_data = (t_bf16 *)t->final_adapter->data;
 		int dim = c->dim;
 		
-		// CRITICAL: Save x_pre for backward pass (only during learning)
+		// [HOTFIX] Issue #1: Use heap-allocated state field instead of static
 		if (t->nested_learning)
-		{
-			// x_pre is already in s->x before modification
-			// We'll cache it in a static buffer (temporary solution)
-			static float x_cache[4096];
-			memcpy(x_cache, s->x, dim * sizeof(float));
-			// Store pointer for backward pass to access
-			// TODO: Add proper field for this
-		}
+			memcpy(s->final_input_cache, s->x, dim * sizeof(float));
 		
 		// Compute adapter @ x and add to x
-		float adapter_out[4096];
+		// SAFETY: Use alloca() for dynamic stack allocation based on actual dim
+		// This prevents stack overflow for models with dim > 4096
+		if (dim > MAX_DIM) {
+			fprintf(stderr, "[FATAL] dim=%d exceeds MAX_DIM=%d for stack alloc\n", dim, MAX_DIM);
+			exit(1);
+		}
+		float *adapter_out = alloca(dim * sizeof(float));
 		#pragma omp parallel for schedule(static)
 		for (int row = 0; row < dim; row++)
 		{
@@ -585,15 +581,17 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 			adapter_out[row] = simd_dot_bf16_f32(a_row, s->x, dim);
 		}
 		
-		// Debug: check adapter contribution magnitude
-		float max_contribution = 0.0f;
-		for (int d = 0; d < dim; d++)
-			if (fabsf(adapter_out[d]) > max_contribution)
-				max_contribution = fabsf(adapter_out[d]);
-		static int debug_count = 0;
-		if (debug_count++ % 50 == 0)
-			printf("[FINAL_ADAPTER] max_out=%.6f, scaled=%.2f\n", 
+		// [HOTFIX] Issue #2: Debug output now behind LOG_HOT macro
+		#ifdef DEBUG_MODE
+		{
+			float max_contribution = 0.0f;
+			for (int d = 0; d < dim; d++)
+				if (fabsf(adapter_out[d]) > max_contribution)
+					max_contribution = fabsf(adapter_out[d]);
+			LOG_DEBUG("[FINAL_ADAPTER] max_out=%.6f, scaled=%.2f\n", 
 				max_contribution, ADAPTER_SCALE * max_contribution);
+		}
+		#endif
 		
 		// Apply scaled adapter output to x
 		for (int d = 0; d < dim; d++)

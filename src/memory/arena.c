@@ -85,7 +85,10 @@ void	*arena_try_alloc(t_arena *a, size_t size)
 	void	*ptr;
 
 	padding = (64 - (a->offset % 64)) % 64;
-	if (a->offset + padding + size > a->size)
+	/* SAFETY: Check for overflow-safe bounds using subtraction
+	** Original: a->offset + padding + size > a->size (can overflow!)
+	** Fixed: Reorder to avoid overflow in addition */
+	if (padding > a->size - a->offset || size > a->size - a->offset - padding)
 		return (NULL);
 	a->offset += padding;
 	ptr = a->base + a->offset;

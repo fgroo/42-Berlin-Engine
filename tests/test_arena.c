@@ -33,7 +33,7 @@ void test_arena_simple_alloc(void) {
     t_arena arena;
     arena_init(&arena, 4096);
     
-    void *ptr = arena_alloc(&arena, 100);
+    void *ptr = arena_alloc_or_die(&arena, 100);
     ASSERT_NOT_NULL(ptr);
     ASSERT_TRUE(arena.offset >= 100); // May include alignment padding
     
@@ -51,12 +51,12 @@ void test_arena_alignment(void) {
     arena_init(&arena, 4096);
     
     // First allocation
-    void *ptr1 = arena_alloc(&arena, 50);
+    void *ptr1 = arena_alloc_or_die(&arena, 50);
     ASSERT_NOT_NULL(ptr1);
     ASSERT_EQ(0, (uintptr_t)ptr1 % 64); // Should be 64-byte aligned
     
     // Second allocation should also be aligned
-    void *ptr2 = arena_alloc(&arena, 25);
+    void *ptr2 = arena_alloc_or_die(&arena, 25);
     ASSERT_NOT_NULL(ptr2);
     ASSERT_EQ(0, (uintptr_t)ptr2 % 64);
     
@@ -78,7 +78,7 @@ void test_arena_multiple_allocs(void) {
     
     void *ptrs[10];
     for (int i = 0; i < 10; i++) {
-        ptrs[i] = arena_alloc(&arena, 100);
+        ptrs[i] = arena_alloc_or_die(&arena, 100);
         ASSERT_NOT_NULL(ptrs[i]);
     }
     
@@ -102,7 +102,7 @@ void test_arena_reset(void) {
     t_arena arena;
     arena_init(&arena, 4096);
     
-    void *ptr1 = arena_alloc(&arena, 1000);
+    void *ptr1 = arena_alloc_or_die(&arena, 1000);
     ASSERT_NOT_NULL(ptr1);
     size_t offset_before = arena.offset;
     ASSERT_TRUE(offset_before >= 1000);
@@ -111,7 +111,7 @@ void test_arena_reset(void) {
     ASSERT_EQ(0, arena.offset);
     
     // Can allocate again from start
-    void *ptr2 = arena_alloc(&arena, 500);
+    void *ptr2 = arena_alloc_or_die(&arena, 500);
     ASSERT_NOT_NULL(ptr2);
     
     arena_free(&arena);
@@ -127,7 +127,7 @@ void test_arena_zero_fill(void) {
     t_arena arena;
     arena_init(&arena, 4096);
     
-    uint8_t *ptr = (uint8_t*)arena_alloc(&arena, 256);
+    uint8_t *ptr = (uint8_t*)arena_alloc_or_die(&arena, 256);
     ASSERT_NOT_NULL(ptr);
     
     // t_arena should zero-fill memory (per implementation in arena.c)
@@ -153,7 +153,7 @@ void test_arena_free(void) {
     t_arena arena;
     arena_init(&arena, 4096);
     
-    arena_alloc(&arena, 100);
+    arena_alloc_or_die(&arena, 100);
     arena_free(&arena);
     
     ASSERT_NULL(arena.base);
@@ -173,11 +173,11 @@ void test_arena_large_alloc(void) {
     size_t size = 2 * 1024 * 1024; // 2MB
     arena_init(&arena, size);
     
-    void *ptr = arena_alloc(&arena, 1024 * 1024); // 1MB
+    void *ptr = arena_alloc_or_die(&arena, 1024 * 1024); // 1MB
     ASSERT_NOT_NULL(ptr);
     
     // Can still allocate more
-    void *ptr2 = arena_alloc(&arena, 512 * 1024); // 512KB
+    void *ptr2 = arena_alloc_or_die(&arena, 512 * 1024); // 512KB
     ASSERT_NOT_NULL(ptr2);
     
     arena_free(&arena);
@@ -194,9 +194,9 @@ void test_arena_contiguous(void) {
     arena_init(&arena, 4096);
     
     // Allocate a series of equal-sized chunks
-    void *ptr1 = arena_alloc(&arena, 64);
-    void *ptr2 = arena_alloc(&arena, 64);
-    void *ptr3 = arena_alloc(&arena, 64);
+    void *ptr1 = arena_alloc_or_die(&arena, 64);
+    void *ptr2 = arena_alloc_or_die(&arena, 64);
+    void *ptr3 = arena_alloc_or_die(&arena, 64);
     
     ASSERT_NOT_NULL(ptr1);
     ASSERT_NOT_NULL(ptr2);
@@ -220,7 +220,7 @@ void test_arena_stress_small(void) {
     arena_init(&arena, 1024 * 1024); // 1MB
     
     for (int i = 0; i < 1000; i++) {
-        void *ptr = arena_alloc(&arena, 8);
+        void *ptr = arena_alloc_or_die(&arena, 8);
         ASSERT_NOT_NULL(ptr);
     }
     

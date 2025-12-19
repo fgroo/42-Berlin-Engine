@@ -64,6 +64,9 @@ typedef struct s_inference_state
 	float	*att; // [n_heads * seq_len] (Attention scores)
 	float	*logits; // [vocab_size]
 	float	*grad_x; // Gradient buffer for backprop [dim]
+	// [HOTFIX] Cache for final layer input during backprop
+	// Replaces dangerous static buffer in forward pass
+	float	*final_input_cache; // [dim]
 	t_kv_cache	*kv_cache; // Array of KV caches [n_layers]
 	// ========== BATCHED PREFILL BUFFERS (Phase 2) ==========
 	// These enable GEMM (M>1) instead of GEMV (M=1) for QKV projections

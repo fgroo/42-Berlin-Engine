@@ -106,4 +106,23 @@
 #  define ADAPTIVE_K_THRESHOLD 0.95f
 # endif
 
+// ========== CENTRALIZED MAGIC NUMBERS ==========
+// Previously hardcoded throughout codebase, now configurable
+
+# ifndef MAX_DIM
+#  define MAX_DIM 8192              /* Maximum model dimension for stack alloc */
+# endif
+
+# ifndef CONTEXT_BIAS_SIZE
+#  define CONTEXT_BIAS_SIZE 65536   /* Bigram context cache size */
+# endif
+
+# ifndef MAX_CANDIDATE_BLOCKS
+#  define MAX_CANDIDATE_BLOCKS 64   /* LSH candidate block limit */
+# endif
+
+# ifndef LINEAR_PROBE_LIMIT
+#  define LINEAR_PROBE_LIMIT 16     /* Hash table probe limit */
+# endif
+
 #endif

@@ -6,12 +6,13 @@
 /*   By: fgroo <fgroo@student.42berlin.de>              +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2025/12/05 00:00:00 by fgroo            #+#    #+#             */
-/*   Updated: 2025/12/05 00:00:00 by fgroo           ###   ########.fr       */
+/*   Updated: 2025/12/18 00:00:00 by fgroo           ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
 #include "fluid.h"
 #include "compute/ops.h"
+#include "compute/ops_simd.h"  /* [HOTFIX] Issue #3: Stochastic rounding */
 #include "../config.h"
 #include <stdio.h>
 #include <string.h>
@@ -19,16 +20,20 @@
 
 void	optimizer_sgd(t_fluid_param *param, float lr)
 {
-	int		size;
-	int		i;
-	t_bf16	*w;
-	t_bf16	*g;
-	float	grad_norm;
-	float	scale;
+	int					size;
+	int					i;
+	t_bf16				*w;
+	t_bf16				*g;
+	float				grad_norm;
+	float				scale;
+	t_xorshift_state	rng;
 
 	size = param->weight->size;
 	w = (t_bf16 *)param->weight->data;
 	g = (t_bf16 *)param->grad->data;
+	
+	/* [HOTFIX] Issue #3: Init RNG for stochastic rounding */
+	xorshift_init(&rng, 0xF142BEEFCAFEULL);
 	
 	/* Compute gradient L2 norm for clipping */
 	grad_norm = 0.0f;
@@ -46,7 +51,7 @@ void	optimizer_sgd(t_fluid_param *param, float lr)
 	if (grad_norm > GRADIENT_NORM_CLIP)
 		scale = GRADIENT_NORM_CLIP / grad_norm;
 	
-	/* Apply gradient update with clipping */
+	/* Apply gradient update with STOCHASTIC ROUNDING (Issue #3) */
 	i = 0;
 	while (i < size)
 	{
@@ -54,7 +59,8 @@ void	optimizer_sgd(t_fluid_param *param, float lr)
 		/* Per-element clip as safety */
 		if (gv > GRADIENT_CLIP) gv = GRADIENT_CLIP;
 		if (gv < -GRADIENT_CLIP) gv = -GRADIENT_CLIP;
-		w[i] = float_to_bf16(bf16_to_float(w[i]) - lr * gv);
+		/* Use stochastic rounding to preserve small gradients */
+		bf16_stochastic_update(&w[i], lr * gv, &rng);
 		i++;
 	}
 }

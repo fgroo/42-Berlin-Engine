@@ -210,6 +210,11 @@ void	paged_kv_append(t_paged_kv_cache *pkv, const float *k, const float *v,
 	page_table_base = pkv->layer_idx * bm->max_logical;
 	
 	/* Check if we need to allocate a new block */
+	/* THREAD SAFETY: Block allocation modifies shared state (free_top, page_table).
+	** During batched prefill, multiple layers may call this concurrently.
+	** Use critical section to prevent corrupted block allocation. */
+	#pragma omp critical(paged_kv_block_alloc)
+	{
 	if (block_idx >= bm->logical_len[pkv->layer_idx])
 	{
 		/* Allocate new physical block */
@@ -226,6 +231,7 @@ void	paged_kv_append(t_paged_kv_cache *pkv, const float *k, const float *v,
 		bm->blocks[phys_idx].start_pos = block_idx * KV_BLOCK_SIZE;
 		pkv->n_blocks = block_idx + 1;
 	}
+	} /* end omp critical */
 	
 	/* Get physical block */
 	phys_idx = bm->page_table[page_table_base + block_idx];

@@ -108,22 +108,18 @@ static void	rmsnorm_f32_avx2(t_tensor *out, const t_tensor *x,
 	int		dim;
 	int		num_tokens;
 	int		i;
-	float	*in_row;
-	float	*out_row;
-	float	ss;
-	float	inv_rms;
 
 	dim = get_norm_dim(x);
 	num_tokens = x->size / dim;
-	i = 0;
-	while (i < num_tokens)
+	// [HOTFIX] Issue #6: Tokens are independent, parallelize!
+	#pragma omp parallel for schedule(static)
+	for (i = 0; i < num_tokens; i++)
 	{
-		in_row = (float *)x->data + i * dim;
-		out_row = (float *)out->data + i * dim;
-		ss = compute_rms_f32_avx2(in_row, dim);
-		inv_rms = 1.0f / sqrtf(ss + eps);
+		float	*in_row = (float *)x->data + i * dim;
+		float	*out_row = (float *)out->data + i * dim;
+		float	ss = compute_rms_f32_avx2(in_row, dim);
+		float	inv_rms = 1.0f / sqrtf(ss + eps);
 		normalize_row_f32_avx2(out_row, in_row, (t_bf16 *)w->data, dim, inv_rms);
-		i++;
 	}
 }
 

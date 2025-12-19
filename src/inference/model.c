@@ -105,7 +105,8 @@ static void *aligned_calloc(size_t num, size_t size)
 {
 	void *ptr = NULL;
 	size_t total = num * size;
-	if (posix_memalign(&ptr, 32, total) != 0) return NULL;
+	/* 64-byte alignment: AVX-512 ready and cache-line aligned */
+	if (posix_memalign(&ptr, 64, total) != 0) return NULL;
 	memset(ptr, 0, total);
 	return ptr;
 }
@@ -211,6 +212,7 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 	t->state.att = aligned_calloc(t->config.n_heads * t->config.seq_len, sizeof(float));
 	t->state.logits = aligned_calloc(t->config.vocab_size, sizeof(float));
 	t->state.grad_x = aligned_calloc(t->config.dim, sizeof(float)); // For backprop
+	t->state.final_input_cache = aligned_calloc(t->config.dim, sizeof(float)); // [HOTFIX] Issue #1
 	
 	// ========== BATCHED PREFILL BUFFERS (Phase 2) ==========
 	// Enable GEMM (M=batch_size) instead of GEMV (M=1) for QKV projections
@@ -517,6 +519,7 @@ void	transformer_free(t_transformer *t)
 	free(t->state.att);
 	free(t->state.logits);
 	free(t->state.grad_x);
+	free(t->state.final_input_cache); // [HOTFIX] Issue #1
 	free(t->state.kv_cache);
 	
 	// Free batch prefill buffers

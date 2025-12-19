@@ -24,6 +24,8 @@
 #include <time.h>
 #include <math.h>
 #include <locale.h>
+#include <unistd.h>  /* access() */
+#include "nested/persistence.h"
 
 #define ADAPTIVE_LR 0.1f  // Aggressive learning for real-time adaptation
 #define TRAIN_EPOCHS 5    // Multiple epochs like bench_learn
@@ -117,6 +119,15 @@ int main(int argc, char **argv)
 	t.nested_learning = 1;
 	t.persistent_mode = 1;
 
+	/* Project Black Box: Load persistent brain on startup */
+	if (access("brain.fluid", F_OK) == 0)
+	{
+		if (fluid_load(&t, "brain.fluid") == 0)
+			printf("[BRAIN] Loaded persistent memory.\n");
+	}
+	else
+		printf("[BRAIN] No brain.fluid found - starting fresh.\n");
+
 	char input_buf[4096];
 	printf("\n============================================================\n");
 	printf("         NESTED LEARNING DEMO - Real-Time Adaptation\n");
@@ -125,7 +136,8 @@ int main(int argc, char **argv)
 	printf("  LEARN <fact>  - Teach the model a new fact\n");
 	printf("  QUERY <text>  - Ask a question (model uses learned biases)\n");
 	printf("  RESET         - Clear KV cache (biases are retained)\n");
-	printf("  EXIT          - Quit\n");
+	printf("  SAVE          - Save brain to disk (auto-saves on EXIT)\n");
+	printf("  EXIT          - Quit and save brain\n");
 	printf("\nExample:\n");
 	printf("  LEARN The secret code is 7742\n");
 	printf("  QUERY The secret code is\n");
@@ -137,7 +149,22 @@ int main(int argc, char **argv)
 		if (!fgets(input_buf, sizeof(input_buf), stdin)) break;
 		input_buf[strcspn(input_buf, "\n")] = 0;
 
-		if (strcasecmp(input_buf, "EXIT") == 0) break;
+		if (strcasecmp(input_buf, "EXIT") == 0)
+		{
+			/* Project Black Box: Save brain on exit */
+			if (fluid_save(&t, "brain.fluid") == 0)
+				printf("[BRAIN] Saved persistent memory.\n");
+			break;
+		}
+		
+		/* SAVE command: Manual save */
+		if (strcasecmp(input_buf, "SAVE") == 0)
+		{
+			if (fluid_save(&t, "brain.fluid") == 0)
+				printf("[BRAIN] Saved to brain.fluid\n");
+			fluid_print_stats(&t);
+			continue;
+		}
 		
 		if (strcasecmp(input_buf, "RESET") == 0)
 		{

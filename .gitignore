@@ -46,6 +46,7 @@ fluids/
 # Development / Experiments
 experiments/
 *.py
+!scripts/*.py
 Nested-Learning.txt
 DeepSeek-sparse-attention-model.txt
 

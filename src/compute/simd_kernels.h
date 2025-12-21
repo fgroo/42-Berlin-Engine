@@ -534,4 +534,105 @@ static inline void	simd_fma_f32(float *out, const float *vec, float scale, int n
 	}
 }
 
+/*
+** ============================================================================
+** SIMD SOFTMAX IN-PLACE (FIX #3)
+** ============================================================================
+** Replaces scalar softmax loop in backward.c for ~10x speedup.
+** Uses fast_expf_avx2 from ops_math_fast.h for vectorized exp().
+**
+** Algorithm:
+**   1. Find max (scalar loop - SIMD reduction is complex and max is cheap)
+**   2. Compute exp(x - max) with AVX2 (8 floats per iteration)
+**   3. Sum all exp values
+**   4. Normalize by dividing by sum
+** ============================================================================
+*/
+# include "ops_math_fast.h"
+
+static inline void	simd_softmax_inplace(float *x, int n)
+{
+	float	max_val;
+	float	sum;
+	int		i;
+# if SIMD_ENABLED
+	__m256	v_max;
+	__m256	v_sum;
+	__m256	v;
+	float	sum_arr[8];
+	float	inv_sum;
+	__m256	v_inv;
+# endif
+
+	/* 1. Find Max (scalar - simple and cache-warm) */
+	max_val = x[0];
+	i = 1;
+	while (i < n)
+	{
+		if (x[i] > max_val)
+			max_val = x[i];
+		i++;
+	}
+
+# if SIMD_ENABLED
+	/* 2. Exp(x - max) with AVX2 & sum */
+	v_max = _mm256_set1_ps(max_val);
+	v_sum = _mm256_setzero_ps();
+	i = 0;
+	while (i + 7 < n)
+	{
+		v = _mm256_loadu_ps(x + i);
+		v = _mm256_sub_ps(v, v_max);
+		v = fast_expf_avx2(v);  /* From ops_math_fast.h */
+		_mm256_storeu_ps(x + i, v);
+		v_sum = _mm256_add_ps(v_sum, v);
+		i += 8;
+	}
+	/* Reduce SIMD sum to scalar */
+	_mm256_storeu_ps(sum_arr, v_sum);
+	sum = sum_arr[0] + sum_arr[1] + sum_arr[2] + sum_arr[3]
+		+ sum_arr[4] + sum_arr[5] + sum_arr[6] + sum_arr[7];
+	/* Scalar remainder for exp */
+	while (i < n)
+	{
+		x[i] = fast_expf(x[i] - max_val);
+		sum += x[i];
+		i++;
+	}
+	/* 3. Normalize with SIMD */
+	inv_sum = 1.0f / sum;
+	v_inv = _mm256_set1_ps(inv_sum);
+	i = 0;
+	while (i + 7 < n)
+	{
+		v = _mm256_loadu_ps(x + i);
+		v = _mm256_mul_ps(v, v_inv);
+		_mm256_storeu_ps(x + i, v);
+		i += 8;
+	}
+	/* Scalar remainder for normalize */
+	while (i < n)
+	{
+		x[i] *= inv_sum;
+		i++;
+	}
+# else
+	/* Scalar fallback */
+	sum = 0.0f;
+	i = 0;
+	while (i < n)
+	{
+		x[i] = expf(x[i] - max_val);
+		sum += x[i];
+		i++;
+	}
+	i = 0;
+	while (i < n)
+	{
+		x[i] /= sum;
+		i++;
+	}
+# endif
+}
+
 #endif

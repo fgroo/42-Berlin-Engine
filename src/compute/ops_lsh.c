@@ -473,7 +473,12 @@ void	lsh_stats_print_atomic(const t_lsh_stats_atomic *s, int sparse_k)
 /*
 ** Brute-force compute true Top-K for validation (EXPENSIVE!)
 ** Used only periodically to monitor LSH quality
+**
+** [FIX #2] No more malloc in hot path - use stack buffer with size cap.
+** If n_keys > cap, we subsample to avoid stack overflow.
 */
+#define MAX_VALIDATION_KEYS 4096  /* Stack limit: 4096 * 4 = 16KB */
+
 static void	bf_compute_topk(
 	const float *query,
 	const uint16_t *keys,
@@ -482,27 +487,38 @@ static void	bf_compute_topk(
 	int k,
 	int *topk_indices)
 {
-	float	*scores;
+	float	scores[MAX_VALIDATION_KEYS];  /* Stack-allocated! */
 	int		i;
 	int		j;
 	int		d;
 	float	dot;
 	float	max_score;
 	int		max_idx;
+	int		stride;
+	int		actual_n;
 
-	scores = (float *)malloc(n_keys * sizeof(float));
-	if (!scores)
-		return ;
-
-	/* Compute all dot products */
-	i = 0;
-	while (i < n_keys)
+	/* [FIX #2] If n_keys too large, subsample to stay within stack budget */
+	if (n_keys > MAX_VALIDATION_KEYS)
 	{
+		stride = n_keys / MAX_VALIDATION_KEYS;
+		actual_n = MAX_VALIDATION_KEYS;
+	}
+	else
+	{
+		stride = 1;
+		actual_n = n_keys;
+	}
+
+	/* Compute dot products (with optional striding for large n_keys) */
+	i = 0;
+	while (i < actual_n)
+	{
+		int key_idx = i * stride;
 		dot = 0.0f;
 		d = 0;
 		while (d < dim)
 		{
-			dot += query[d] * bf16_to_f32_safe(keys[i * dim + d]);
+			dot += query[d] * bf16_to_f32_safe(keys[key_idx * dim + d]);
 			d++;
 		}
 		scores[i] = dot;
@@ -511,12 +527,12 @@ static void	bf_compute_topk(
 
 	/* Find Top-K via repeated argmax (O(n*k), fine for validation) */
 	j = 0;
-	while (j < k)
+	while (j < k && j < actual_n)
 	{
 		max_score = -1e30f;
 		max_idx = 0;
 		i = 0;
-		while (i < n_keys)
+		while (i < actual_n)
 		{
 			if (scores[i] > max_score)
 			{
@@ -525,12 +541,17 @@ static void	bf_compute_topk(
 			}
 			i++;
 		}
-		topk_indices[j] = max_idx;
+		/* Map back to original key index */
+		topk_indices[j] = max_idx * stride;
 		scores[max_idx] = -1e30f;  /* Mark as used */
 		j++;
 	}
-	free(scores);
 }
+
+/*
+** [FIX #2] Stack-allocated validation - no malloc in hot path
+*/
+#define MAX_TOPK_VALIDATION 64  /* actual_k is typically 32 or less */
 
 float	lsh_validate_recall(
 	const float *query,
@@ -541,7 +562,7 @@ float	lsh_validate_recall(
 	int lsh_k,
 	int actual_k)
 {
-	int		*bf_topk;
+	int		bf_topk[MAX_TOPK_VALIDATION];  /* Stack-allocated! */
 	int		hits;
 	int		i;
 	int		j;
@@ -551,10 +572,9 @@ float	lsh_validate_recall(
 		actual_k = n_keys;
 	if (lsh_k > actual_k)
 		lsh_k = actual_k;
-
-	bf_topk = (int *)malloc(actual_k * sizeof(int));
-	if (!bf_topk)
-		return (0.0f);
+	/* Cap actual_k to stack buffer size */
+	if (actual_k > MAX_TOPK_VALIDATION)
+		actual_k = MAX_TOPK_VALIDATION;
 
 	/* Get brute-force Top-K */
 	bf_compute_topk(query, keys, n_keys, dim, actual_k, bf_topk);
@@ -576,7 +596,6 @@ float	lsh_validate_recall(
 		}
 		i++;
 	}
-	free(bf_topk);
 
 	recall = (float)hits / (float)actual_k;
 

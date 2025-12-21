@@ -52,6 +52,7 @@ typedef struct s_nl_atomic_state
 {
 	_Atomic uint64_t	counters;      /* Packed step + skipped */
 	_Atomic int32_t		actual_steps;  /* Per-turn actual learning steps */
+	_Atomic uint64_t	call_counter;  /* RNG seed modifier - thread-safe (FIX #1) */
 }	t_nl_atomic_state;
 
 /*
@@ -67,6 +68,7 @@ static inline void	nl_counters_reset(t_nl_atomic_state *s)
 {
 	atomic_store_explicit(&s->counters, 0ULL, memory_order_release);
 	atomic_store_explicit(&s->actual_steps, 0, memory_order_release);
+	/* Note: call_counter is NOT reset - it's a monotonic counter for RNG entropy */
 }
 
 /*

@@ -1,0 +1,43 @@
+# ============================================================================
+# CRITICAL: Exclude model weights (multi-GB files!)
+# Without this, docker build hangs for minutes sending context
+# ============================================================================
+Ministral-Stuff/
+SmolLM3-Stuff/
+weights/
+fluids/
+*.safetensors
+*.bin
+*.pth
+*.gguf
+
+# Build artifacts (rebuild in container)
+*.o
+42d
+chat
+test_*
+bench_*
+engine_test
+fluid-get
+fluid-merge
+
+# Git
+.git/
+.gitignore
+
+# AutoGPT (separate container)
+AutoGPT/
+
+# Experiments and docs
+experiments/
+*.txt
+*.md
+*.py
+
+# Logs and temp
+*.log
+/tmp/
+
+# Other
+install.sh
+

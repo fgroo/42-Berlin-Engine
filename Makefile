@@ -110,7 +110,7 @@ debug: fclean $(NAME)
 	@echo "[DEBUG] Built with -g -fsanitize=address"
 	@echo ""
 
-# Release build (Gold Master) - stripped, no debug, maximum optimization
+# Release build (Gold Master — kinda cringe naming here) - stripped, no debug, maximum optimization
 release: fclean
 	@echo ""
 	@echo "╔══════════════════════════════════════════════════════════════╗"
@@ -144,6 +144,7 @@ clean:
 
 fclean: clean
 	rm -f $(NAME)
+	rm -f 42d debug_tok
 	rm -f chat chat_adaptive bench_perf bench_learn bench_haystack
 	rm -f engine_test test_tokenizer test_inference
 	rm -f fluid-info fluid-merge fluid-get fluid-test dump_tensors
@@ -177,6 +178,10 @@ help:
 # ============================================================================
 # Legacy targets (for backwards compatibility)
 # ============================================================================
+chat: $(LIB_OBJS) $(SRC_DIR)/chat.o
+	$(CC) $(LIB_OBJS) $(SRC_DIR)/chat.o -o chat $(LDFLAGS)
+	@echo "[CHAT] Built legacy chat binary"
+
 chat_adaptive: $(LIB_OBJS) $(SRC_DIR)/chat_adaptive.o
 	$(CC) $(LIB_OBJS) $(SRC_DIR)/chat_adaptive.o -o chat_adaptive $(LDFLAGS)
 
@@ -200,4 +205,29 @@ fluid-merge: $(SRC_DIR)/fluid/fluid_merge.c
 fluid-get: $(SRC_DIR)/fluid/fluid_get.c
 	$(CC) -Wall -Wextra -O2 -Isrc $(SRC_DIR)/fluid/fluid_get.c -o fluid-get
 	@echo "[TOOLS] Built fluid-get"
+
+# ============================================================================
+# HTTP Daemon (42d - OpenAI-compatible API server)
+# Phase 9: Total OpenAI Compatibility (flexible routing, thinking support)
+# ============================================================================
+SERVER_SRCS = $(SRC_DIR)/server/server.c \
+              $(SRC_DIR)/server/queue.c \
+              $(SRC_DIR)/server/worker.c \
+              $(SRC_DIR)/server/json_parse.c
+SERVER_OBJS = $(SERVER_SRCS:.c=.o)
+DAEMON_SRC = $(SRC_DIR)/server/42d.c
+DAEMON_OBJ = $(DAEMON_SRC:.c=.o)
+
+daemon: 42d
+	@echo ""
+	@echo "╔══════════════════════════════════════════════════════════════╗"
+	@echo "║       42-BERLIN-ENGINE DAEMON v0.2 (Async): Build Complete   ║"
+	@echo "╚══════════════════════════════════════════════════════════════╝"
+	@echo ""
+	@echo "  Binary: ./42d"
+	@echo "  Usage:  ./42d -m model.safetensors -t tokenizer.json [-p 8080]"
+	@echo ""
+
+42d: $(LIB_OBJS) $(SERVER_OBJS) $(DAEMON_OBJ)
+	$(CC) $(LIB_OBJS) $(SERVER_OBJS) $(DAEMON_OBJ) -o 42d $(LDFLAGS) -lpthread
 

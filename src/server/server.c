@@ -493,14 +493,42 @@ int	handle_distill(t_server *srv, t_client_conn *conn)
 
 	/* Execute distillation backward pass */
 	backward_step_distill(srv->engine, teacher_probs, num_probs,
-		target_token, alpha, 0);
+		target_token, alpha, srv->ctx.session_pos);
 
-	/* Send success response with actual count */
+	/*
+	** PHASE 5: Teacher Forcing
+	** After learning from current logits, advance to next position
+	** by feeding the teacher's chosen token through forward pass.
+	*/
+	int advance_token = -1;
+	char advance_str[256];
+	
+	/* Try string-based token first */
+	if (distill_parse_string(body, "\"advance_with_token_str\"", advance_str, 256) > 0)
 	{
-		char resp[128];
+		if (srv->tokenizer)
+			advance_token = tokenizer_lookup_id(srv->tokenizer, advance_str);
+	}
+	
+	/* Fallback: numeric token ID */
+	if (advance_token < 0)
+		advance_token = distill_parse_int(body, "\"advance_with_token\"");
+
+	/* Execute forward pass to advance engine state */
+	if (advance_token >= 0 && advance_token < srv->engine->config.vocab_size)
+	{
+		transformer_forward(srv->engine, advance_token, srv->ctx.session_pos);
+		srv->ctx.session_pos++;
+	}
+
+	/* Send success response with position info */
+	{
+		char resp[256];
 		snprintf(resp, sizeof(resp),
-			"{\"status\":\"ok\",\"distilled\":true,\"num_teacher_probs\":%d}",
-			num_probs);
+			"{\"status\":\"ok\",\"distilled\":true,"
+			"\"num_teacher_probs\":%d,\"pos\":%d,\"advanced\":%s}",
+			num_probs, srv->ctx.session_pos,
+			(advance_token >= 0) ? "true" : "false");
 		send_json_response(conn, 200, resp);
 	}
 	return (0);

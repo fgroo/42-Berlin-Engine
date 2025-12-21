@@ -139,22 +139,27 @@ def distill_knowledge(prompt: str, teacher_data: Dict, alpha: float = 0.5):
         # 2. Target token string (engine will look up ID)
         target_token_str = token_data['token']
         
-        # 3. Payload for C-Engine
+        # 3. Payload for C-Engine with Teacher Forcing
         payload = {
             "teacher_logprobs": teacher_distribution,
-            "target_token_str": target_token_str,  # String, not ID
-            "target_token": -1,  # Fallback, engine uses token_str
-            "alpha": alpha
+            "target_token_str": target_token_str,
+            "target_token": -1,
+            "alpha": alpha,
+            # PHASE 5: Teacher Forcing - advance engine with this token
+            "advance_with_token_str": target_token_str
         }
         
         # 4. Push to Engine
         try:
-            r = requests.post(ENGINE_URL, json=payload, timeout=5)
+            r = requests.post(ENGINE_URL, json=payload, timeout=30)
             if r.status_code == 200:
                 resp = r.json()
                 num_mapped = resp.get('num_teacher_probs', 0)
+                new_pos = resp.get('pos', -1)
+                advanced = resp.get('advanced', False)
                 tokens_mapped += num_mapped
-                print(f"    Step {i}: '{token_data['token']}' -> {num_mapped} tokens mapped")
+                status = f"pos={new_pos}" if advanced else "no advance"
+                print(f"    Step {i}: '{token_data['token']}' -> {num_mapped} tokens, {status}")
                 success_count += 1
             else:
                 print(f"    Step {i}: Engine Rejected -> {r.status_code} {r.text[:50]}")

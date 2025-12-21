@@ -11,6 +11,7 @@
 /* ************************************************************************** */
 
 #include "worker.h"
+#include "memory/paged.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -241,65 +242,81 @@ void	*worker_routine(void *arg)
 				"Considering optimal implementation approach...");
 		}
 
-		/* Phase 10: Chat Template Injection (Ministral-3B-Instruct format) */
-		char	*final_prompt;
-		char	template_buf[16384];
-		int		template_allocated;
-
-		template_allocated = 0;
-		final_prompt = job.prompt;
-
-		/* Check if user already sent the template */
-		if (job.prompt && strstr(job.prompt, "[INST]") == NULL)
+		/* Phase 10: Chat Template using Token IDs (like chat.c)
+		** String-based templating fails because the tokenizer doesn't
+		** recognize [INST], [/INST] as special tokens when encoded as strings.
+		** We must build: [BOS=1] [INST=3] <user_tokens> [INST_END=4] */
+		
+		#define TOKEN_BOS 1
+		#define TOKEN_INST 3
+		#define TOKEN_INST_END 4
+		
+		/* 3. Tokenize user prompt with space prefix (like chat.c) */
+		int *user_tokens = NULL;
+		char *spaced_prompt = malloc(strlen(job.prompt) + 2);
+		if (spaced_prompt)
 		{
-			int required_len;
-
-			/* Ministral format: [INST] {prompt} [/INST]
-			** NOTE: No <s> prefix! Tokenizer adds BOS automatically.
-			** Adding <s> here causes Double BOS which confuses the model. */
-			required_len = snprintf(NULL, 0, "[INST] %s [/INST]", job.prompt);
-			if (required_len < (int)sizeof(template_buf))
-			{
-				snprintf(template_buf, sizeof(template_buf),
-					"[INST] %s [/INST]", job.prompt);
-				final_prompt = template_buf;
-			}
-			else
-			{
-				/* Heap fallback for huge prompts */
-				final_prompt = malloc(required_len + 1);
-				if (final_prompt)
-				{
-					snprintf(final_prompt, required_len + 1,
-						"[INST] %s [/INST]", job.prompt);
-					template_allocated = 1;
-				}
-				else
-					final_prompt = job.prompt;  /* Fallback to raw */
-			}
-			printf("[WORKER] Template injected\n");
+			spaced_prompt[0] = ' ';
+			strcpy(spaced_prompt + 1, job.prompt);
 		}
-		printf("[WORKER] Final prompt: %.100s%s\n", final_prompt,
-			strlen(final_prompt) > 100 ? "..." : "");
-
-		/* 3. Tokenize prompt */
-		tokens = NULL;
-		n_tokens = tokenizer_encode(ctx->tokenizer, final_prompt, &tokens);
-		if (n_tokens <= 0 || !tokens)
+		int n_user = tokenizer_encode(ctx->tokenizer, 
+			spaced_prompt ? spaced_prompt : job.prompt, &user_tokens);
+		if (spaced_prompt)
+			free(spaced_prompt);
+		if (n_user <= 0 || !user_tokens)
 		{
 			printf("[WORKER] Tokenization failed\n");
 			close(job.client_fd);
 			if (job.prompt)
 				free(job.prompt);
-			if (template_allocated)
-				free(final_prompt);
 			continue ;
 		}
-		printf("[WORKER] Tokenized %d tokens\n", n_tokens);
+		
+		/* Build final token array: [BOS] [INST] <user_tokens> [INST_END] */
+		n_tokens = 1 + 1 + n_user + 1;  /* BOS + INST + user + INST_END */
+		tokens = malloc(n_tokens * sizeof(int));
+		if (!tokens)
+		{
+			printf("[WORKER] Token allocation failed\n");
+			free(user_tokens);
+			close(job.client_fd);
+			if (job.prompt)
+				free(job.prompt);
+			continue ;
+		}
+		
+		{
+			int idx = 0;
+			tokens[idx++] = TOKEN_BOS;       /* <s> */
+			tokens[idx++] = TOKEN_INST;      /* [INST] */
+			for (int i = 0; i < n_user; i++)
+				tokens[idx++] = user_tokens[i];
+			tokens[idx++] = TOKEN_INST_END;  /* [/INST] */
+		}
+	free(user_tokens);
+		
+		printf("[WORKER] Built %d tokens: [BOS=%d, INST=%d, ...%d user..., INST_END=%d]\n",
+			n_tokens, tokens[0], tokens[1], n_user, tokens[n_tokens-1]);
 
-		/* 4. Prefill (batched) */
-		if (n_tokens > 1)
-			forward_prefill_batch(ctx->engine, tokens, n_tokens - 1, 0);
+		/* CRITICAL: Reset KV cache before each request!
+		** Without this, old cached keys/values corrupt output. */
+		for (int l = 0; l < ctx->engine->config.n_layers; l++)
+			ctx->engine->state.kv_cache[l].current_seq_len = 0;
+		if (ctx->engine->use_paged_kv && ctx->engine->paged_kv)
+		{
+			for (int l = 0; l < ctx->engine->config.n_layers; l++)
+				paged_kv_reset(&ctx->engine->paged_kv[l]);
+		}
+		
+		/* 4. SEQUENTIAL PREFILL (like chat.c)
+		** The batch kernel (forward_prefill_batch) has a bug causing garbage.
+		** Sequential forward is identical to the working chat.c code path. */
+		printf("[WORKER] Running sequential prefill for %d tokens...\n", n_tokens);
+		for (int i = 0; i < n_tokens - 1; i++)
+		{
+			transformer_forward(ctx->engine, tokens[i], i);
+		}
+		printf("[WORKER] Prefill done.\n");
 
 		/* 5. Get initial logits from last prompt token */
 		logits = transformer_forward(ctx->engine, tokens[n_tokens - 1],
@@ -379,8 +396,6 @@ void	*worker_routine(void *arg)
 			free(job.prompt);
 		if (tokens)
 			free(tokens);
-		if (template_allocated)
-			free(final_prompt);
 	}
 
 	printf("[WORKER] Inference worker stopped\n");

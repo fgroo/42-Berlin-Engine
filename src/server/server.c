@@ -15,9 +15,11 @@
 #include "worker.h"
 #include "json_parse.h"
 #include "memory/safe_alloc.h"
+#include "core/types.h"  /* MOPD: t_sparse_prob */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>  /* expf for logprob -> prob conversion */
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -342,6 +344,114 @@ static int	handle_chat_completions(t_server *srv, t_client_conn *conn)
 
 /*
 ** ============================================================================
+** MOPD DISTILLATION ENDPOINT
+** ============================================================================
+** POST /v1/distill - Knowledge distillation from teacher model
+** Expects: { "teacher_logprobs": [...], "target_token": N, "alpha": 0.8 }
+*/
+
+/* Parse float field from JSON (minimal parser) */
+static float	distill_parse_float(const char *json, const char *key)
+{
+	const char	*pos;
+
+	pos = strstr(json, key);
+	if (!pos)
+		return (0.0f);
+	while (*pos && *pos != ':')
+		pos++;
+	if (*pos)
+		pos++;
+	return (strtof(pos, NULL));
+}
+
+/* Parse int field from JSON */
+static int	distill_parse_int(const char *json, const char *key)
+{
+	const char	*pos;
+
+	pos = strstr(json, key);
+	if (!pos)
+		return (-1);
+	while (*pos && *pos != ':')
+		pos++;
+	if (*pos)
+		pos++;
+	return ((int)strtol(pos, NULL, 10));
+}
+
+int	handle_distill(t_server *srv, t_client_conn *conn)
+{
+	t_sparse_prob	teacher_probs[32];  /* Stack alloc for speed */
+	int				num_probs;
+	float			alpha;
+	int				target_token;
+	const char		*body;
+	const char		*cursor;
+	const char		*obj_start;
+	int				tid;
+	float			logprob;
+
+	if (!conn->request.body || conn->request.body_len == 0)
+	{
+		send_error_response(conn, 400, "No request body");
+		return (0);
+	}
+
+	body = conn->request.body;
+	alpha = distill_parse_float(body, "\"alpha\"");
+	target_token = distill_parse_int(body, "\"target_token\"");
+
+	/* Clamp alpha to [0, 1] */
+	if (alpha < 0.0f)
+		alpha = 0.0f;
+	if (alpha > 1.0f)
+		alpha = 1.0f;
+
+	/* Parse sparse teacher_logprobs array */
+	num_probs = 0;
+	cursor = strstr(body, "\"teacher_logprobs\"");
+	if (cursor)
+	{
+		cursor = strchr(cursor, '[');
+		while (cursor && *cursor != ']' && num_probs < 32)
+		{
+			obj_start = strchr(cursor, '{');
+			if (!obj_start)
+				break ;
+			tid = distill_parse_int(obj_start, "\"token\"");
+			logprob = distill_parse_float(obj_start, "\"logprob\"");
+			if (tid >= 0)
+			{
+				teacher_probs[num_probs].token_id = tid;
+				teacher_probs[num_probs].prob = expf(logprob);  /* Log -> Lin */
+				num_probs++;
+			}
+			cursor = strchr(obj_start, '}');
+			if (cursor)
+				cursor++;
+		}
+	}
+
+	/* Check if engine has valid logits from recent forward pass */
+	if (!srv->engine || !srv->engine->state.logits)
+	{
+		send_error_response(conn, 400, "No active logits. Run inference first.");
+		return (0);
+	}
+
+	/* Execute distillation backward pass */
+	backward_step_distill(srv->engine, teacher_probs, num_probs,
+		target_token, alpha, 0);
+
+	/* Send success response */
+	send_json_response(conn, 200,
+		"{\"status\":\"ok\",\"distilled\":true,\"num_teacher_probs\":0}");
+	return (0);
+}
+
+/*
+** ============================================================================
 ** REQUEST DISPATCH
 ** ============================================================================
 ** Phase 9: Flexible URL routing for OpenAI SDK compatibility
@@ -403,6 +513,13 @@ int	handle_request(t_server *srv, t_client_conn *conn)
 	{
 		/* Treat legacy completions as chat completions */
 		return (handle_chat_completions(srv, conn));
+	}
+
+	/* POST /distill (MOPD: teacher distillation endpoint) */
+	if (strcmp(conn->request.method, "POST") == 0
+		&& path_ends_with(conn->request.path, "/distill"))
+	{
+		return (handle_distill(srv, conn));
 	}
 
 	/* 404 for everything else */

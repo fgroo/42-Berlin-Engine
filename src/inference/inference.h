@@ -7,6 +7,7 @@
 # include "memory/kv_cache.h"
 # include "memory/paged.h"
 # include "memory/arena.h"
+# include "core/types.h"  /* MOPD: t_sparse_prob, t_distill_request */
 # include <stdatomic.h>  // C11 atomics for thread-safe NL counters
 # include "nested/nl_counters.h"  // CAS-based lock-free NL counters
 # include "compute/ops_lsh.h"  // Thread-safe LSH stats (Phase 9)
@@ -196,5 +197,40 @@ void	deactivate_vision_tower(t_transformer *t);
 // Backward pass (nested/backward.c) - FP32 gradient accumulation
 void	backward_zero_grads(t_transformer *t);
 void	backward_apply_grads(t_transformer *t, float lr);
+
+/*
+** ============================================================================
+** MOPD (Multi-Teacher On-Policy Distillation) - Phase 1
+** ============================================================================
+** Splits backward pass into modular components for flexible loss functions.
+** ============================================================================
+*/
+
+/*
+** Core backprop mechanism: Takes d_logits and propagates through all layers.
+** This is the "heavy lifter" - does MatMul transpose, accumulates grads.
+** @param d_logits  Gradient vector [vocab_size], dL/dlogits
+** @param pos       Current sequence position
+*/
+void	backward_propagate_logits(t_transformer *t, float *d_logits, int pos);
+
+/*
+** Cross-Entropy backward (standard training).
+** Computes gradient as: softmax(logits) - one_hot(target)
+*/
+void	backward_step_ce(t_transformer *t, int target_token, int pos);
+
+/*
+** MOPD Distillation backward pass.
+** Computes gradient as: softmax(logits) - mixed_target
+** where mixed_target = alpha * teacher + (1-alpha) * one_hot
+**
+** @param teacher_probs  Sparse probability distribution from teacher
+** @param num_probs      Number of entries in teacher_probs
+** @param target_token   Ground truth token (for hard label component)
+** @param alpha          Mixing coefficient [0.0 = pure CE, 1.0 = pure teacher]
+*/
+void	backward_step_distill(t_transformer *t, t_sparse_prob *teacher_probs,
+			int num_probs, int target_token, float alpha, int pos);
 
 #endif

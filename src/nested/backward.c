@@ -475,3 +475,156 @@ void	transformer_backward_step(t_transformer *t, int target_token, int pos)
 		layer--;
 	}
 }
+
+/*
+** ============================================================================
+** MOPD (Multi-Teacher On-Policy Distillation) - Phase 1
+** ============================================================================
+*/
+
+/*
+** Core backprop mechanism: Takes precomputed d_logits and propagates through
+** all layers. This is the "heavy lifter" extracted from transformer_backward_step.
+**
+** NOTE: This function assumes d_logits already contains softmax(logits) - target
+** It does NOT compute loss or do skip logic - that's the caller's job.
+*/
+void	backward_propagate_logits(t_transformer *t, float *d_logits, int pos)
+{
+	t_transformer_config	*c;
+	t_inference_state		*s;
+	int						layer;
+
+	(void)pos;
+	if (!t->nested_learning || !t->fluid_layers)
+		return ;
+	c = &t->config;
+	s = &t->state;
+
+	/* Copy d_logits to state.logits for backprop_output_layer compatibility */
+	memcpy(s->logits, d_logits, c->vocab_size * sizeof(float));
+
+	/* Backprop through output layer */
+	backprop_output_layer(t, s->grad_x);
+
+	/* Accumulate gradients for final_adapter if present */
+	if (t->final_adapter_grad && t->final_adapter)
+	{
+		int dim = c->dim;
+		float *grad = t->final_adapter_grad;
+
+		#pragma omp parallel for schedule(static)
+		for (int i = 0; i < dim; i++)
+		{
+			float grad_xi = s->grad_x[i] * ADAPTER_SCALE;
+			float *grad_row = grad + i * dim;
+			for (int j = 0; j < dim; j++)
+				grad_row[j] += grad_xi * s->final_input_cache[j];
+		}
+	}
+
+	/* Accumulate gradients into FP32 buffers (reverse layer order) */
+	layer = c->n_layers - 1;
+	while (layer >= 0)
+	{
+		if (layer >= FROZEN_LAYERS)
+			accumulate_layer_grads(t, layer);
+		layer--;
+	}
+}
+
+/*
+** Cross-Entropy backward pass (standard training wrapper).
+** Computes gradient as: softmax(logits) - one_hot(target)
+** Uses scratch arena for temporary d_logits buffer.
+*/
+void	backward_step_ce(t_transformer *t, int target_token, int pos)
+{
+	t_transformer_config	*c;
+	float					*d_logits;
+
+	if (!t->nested_learning || !t->fluid_layers)
+		return ;
+	c = &t->config;
+
+	/* Allocate scratch buffer for gradients */
+	d_logits = arena_try_alloc(&t->scratch, c->vocab_size * sizeof(float));
+	if (!d_logits)
+	{
+		fprintf(stderr, "[MOPD] OOM for d_logits scratch\n");
+		return ;
+	}
+
+	/* Copy logits and compute softmax */
+	memcpy(d_logits, t->state.logits, c->vocab_size * sizeof(float));
+	simd_softmax_inplace(d_logits, c->vocab_size);
+
+	/* CE Gradient: softmax - one_hot */
+	d_logits[target_token] -= 1.0f;
+
+	/* Propagate through layers */
+	backward_propagate_logits(t, d_logits, pos);
+
+	/* Reset scratch arena */
+	arena_reset(&t->scratch);
+}
+
+/*
+** MOPD Distillation backward pass.
+** Computes gradient as: softmax(logits) - mixed_target
+** where mixed_target = alpha * teacher + (1-alpha) * one_hot
+**
+** This is the heart of knowledge distillation - pulling student towards teacher.
+*/
+void	backward_step_distill(t_transformer *t, t_sparse_prob *teacher_probs,
+			int num_probs, int target_token, float alpha, int pos)
+{
+	t_transformer_config	*c;
+	float					*d_logits;
+	int						i;
+
+	if (!t->nested_learning || !t->fluid_layers)
+		return ;
+	c = &t->config;
+
+	/* Validate alpha */
+	if (alpha < 0.0f)
+		alpha = 0.0f;
+	if (alpha > 1.0f)
+		alpha = 1.0f;
+
+	/* Allocate scratch buffer */
+	d_logits = arena_try_alloc(&t->scratch, c->vocab_size * sizeof(float));
+	if (!d_logits)
+	{
+		fprintf(stderr, "[MOPD] OOM for distill d_logits\n");
+		return ;
+	}
+
+	/* Copy logits and compute softmax -> student probs Q(x) */
+	memcpy(d_logits, t->state.logits, c->vocab_size * sizeof(float));
+	simd_softmax_inplace(d_logits, c->vocab_size);
+
+	/* d_logits now contains Q(x) = student probabilities
+	** Gradient: Q(x) - P_mixed(x)
+	** P_mixed = alpha * P_teacher + (1-alpha) * P_target */
+
+	/* Step A: Subtract hard label component (one_hot weighted by 1-alpha) */
+	if (target_token >= 0 && target_token < c->vocab_size)
+		d_logits[target_token] -= (1.0f - alpha);
+
+	/* Step B: Subtract teacher component (sparse!)
+	** Only iterate over tokens the teacher gave us - extremely efficient */
+	for (i = 0; i < num_probs; i++)
+	{
+		int idx = teacher_probs[i].token_id;
+		if (idx >= 0 && idx < c->vocab_size)
+			d_logits[idx] -= (alpha * teacher_probs[i].prob);
+	}
+
+	/* Propagate through layers */
+	backward_propagate_logits(t, d_logits, pos);
+
+	/* Reset scratch arena */
+	arena_reset(&t->scratch);
+}

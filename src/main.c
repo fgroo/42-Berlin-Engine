@@ -369,10 +369,33 @@ static int	run_chat_mode(t_transformer *t, t_tokenizer *tok,
 		int old_learn = t->nested_learning;
 		t->nested_learning = 0;  /* Disable learning during inference */
 
-		int *tokens;
-		int n_tokens = tokenizer_encode(tok, query, &tokens);
-		if (n_tokens <= 0)
+		/* Build tokens with proper chat template: [BOS=1][INST=3]<user>[INST_END=4]
+		** Raw tokenization without template causes garbage output. */
+		#define TOKEN_BOS 1
+		#define TOKEN_INST 3
+		#define TOKEN_INST_END 4
+		
+		int *user_tokens;
+		int n_user = tokenizer_encode(tok, query, &user_tokens);
+		if (n_user <= 0)
 			continue;
+		
+		int n_tokens = 1 + 1 + n_user + 1;  /* BOS + INST + user + INST_END */
+		int *tokens = malloc(n_tokens * sizeof(int));
+		if (!tokens)
+		{
+			free(user_tokens);
+			continue;
+		}
+		{
+			int idx = 0;
+			tokens[idx++] = TOKEN_BOS;
+			tokens[idx++] = TOKEN_INST;
+			for (int i = 0; i < n_user; i++)
+				tokens[idx++] = user_tokens[i];
+			tokens[idx++] = TOKEN_INST_END;
+		}
+		free(user_tokens);
 
 		/* Prefill */
 		for (int i = 0; i < n_tokens; i++)

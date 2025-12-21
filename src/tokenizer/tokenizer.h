@@ -36,6 +36,10 @@ int				tokenizer_encode(t_tokenizer *t, const char *text,
 // Decode token ID to string. Returns pointer to internal string (do not free).
 const char	*tokenizer_decode(t_tokenizer *t, int token_id);
 
+// MOPD: Lookup token string to get its ID. Returns unk_id if not found.
+// Used for teacher distillation where we receive token strings instead of IDs.
+int			tokenizer_lookup_id(t_tokenizer *t, const char *token_str);
+
 // Free tokenizer resources
 void			tokenizer_free(t_tokenizer *t);
 

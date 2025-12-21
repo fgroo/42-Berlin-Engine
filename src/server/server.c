@@ -380,6 +380,41 @@ static int	distill_parse_int(const char *json, const char *key)
 	return ((int)strtol(pos, NULL, 10));
 }
 
+/* Parse string field from JSON into buffer */
+static int	distill_parse_string(const char *json, const char *key,
+				char *buf, int buf_size)
+{
+	const char	*pos;
+	const char	*start;
+	const char	*end;
+	int			len;
+
+	pos = strstr(json, key);
+	if (!pos)
+		return (0);
+	pos = strchr(pos, ':');
+	if (!pos)
+		return (0);
+	while (*pos && *pos != '"')
+		pos++;
+	if (!*pos)
+		return (0);
+	start = pos + 1;  /* Skip opening quote */
+	end = start;
+	while (*end && *end != '"')
+	{
+		if (*end == '\\' && *(end + 1))
+			end++;  /* Skip escaped char */
+		end++;
+	}
+	len = (int)(end - start);
+	if (len >= buf_size)
+		len = buf_size - 1;
+	memcpy(buf, start, len);
+	buf[len] = '\0';
+	return (len);
+}
+
 int	handle_distill(t_server *srv, t_client_conn *conn)
 {
 	t_sparse_prob	teacher_probs[32];  /* Stack alloc for speed */
@@ -391,6 +426,7 @@ int	handle_distill(t_server *srv, t_client_conn *conn)
 	const char		*obj_start;
 	int				tid;
 	float			logprob;
+	char			token_str[256];
 
 	if (!conn->request.body || conn->request.body_len == 0)
 	{
@@ -419,9 +455,24 @@ int	handle_distill(t_server *srv, t_client_conn *conn)
 			obj_start = strchr(cursor, '{');
 			if (!obj_start)
 				break ;
-			tid = distill_parse_int(obj_start, "\"token\"");
+			
+			/* Try string-based token first (MOPD Phase 4) */
+			tid = -1;
+			if (distill_parse_string(obj_start, "\"token_str\"", token_str, 256) > 0)
+			{
+				/* Use tokenizer to convert string -> ID */
+				if (srv->tokenizer)
+					tid = tokenizer_lookup_id(srv->tokenizer, token_str);
+			}
+			
+			/* Fallback: numeric token field (backwards compat) */
+			if (tid < 0)
+				tid = distill_parse_int(obj_start, "\"token\"");
+			
 			logprob = distill_parse_float(obj_start, "\"logprob\"");
-			if (tid >= 0)
+			
+			/* Only add valid tokens within vocab range */
+			if (tid >= 0 && srv->engine && tid < srv->engine->config.vocab_size)
 			{
 				teacher_probs[num_probs].token_id = tid;
 				teacher_probs[num_probs].prob = expf(logprob);  /* Log -> Lin */
@@ -444,9 +495,14 @@ int	handle_distill(t_server *srv, t_client_conn *conn)
 	backward_step_distill(srv->engine, teacher_probs, num_probs,
 		target_token, alpha, 0);
 
-	/* Send success response */
-	send_json_response(conn, 200,
-		"{\"status\":\"ok\",\"distilled\":true,\"num_teacher_probs\":0}");
+	/* Send success response with actual count */
+	{
+		char resp[128];
+		snprintf(resp, sizeof(resp),
+			"{\"status\":\"ok\",\"distilled\":true,\"num_teacher_probs\":%d}",
+			num_probs);
+		send_json_response(conn, 200, resp);
+	}
 	return (0);
 }
 

@@ -59,25 +59,16 @@ def transform_logprobs(openai_top_logprobs: List[Dict]) -> List[Dict]:
     """
     Convert OpenAI format to 42-Engine format.
     
-    WARNING: TOKEN ID MISMATCH!
-    OpenAI uses cl100k_base tokenizer. Ministral uses Llama/Mistral tokenizer.
-    The IDs will NOT match.
-    
-    For this test, we send fake IDs based on hash.
-    In production, the engine must receive token strings and re-tokenize!
+    PHASE 4: Send token strings, not IDs!
+    The C engine uses its own tokenizer to look up the correct ID.
+    This fixes the tokenizer mismatch between GPT and Ministral.
     """
     sparse_probs = []
     for item in openai_top_logprobs:
         # OpenAI item: {'token': 'The', 'logprob': -0.1, 'bytes': ...}
-        # We need a mapping: text -> local_token_id
-        # Since we don't have that yet, we fake the ID for testing
-        
-        # HACK: Use hash(token) % vocab_size to avoid out-of-bounds
-        # Ministral vocab is 131072, but we cap at 32000 for safety
-        fake_id = abs(hash(item['token'])) % 32000 
-        
+        # Send the raw token string - engine will re-tokenize
         sparse_probs.append({
-            "token": fake_id, 
+            "token_str": item['token'],  # String, not ID!
             "logprob": item['logprob']
         })
     return sparse_probs
@@ -118,7 +109,7 @@ def prime_engine(prompt: str) -> bool:
         return False
 
 
-def distill_knowledge(prompt: str, teacher_data: Dict):
+def distill_knowledge(prompt: str, teacher_data: Dict, alpha: float = 0.5):
     """
     Send teacher data to local C-Engine for distillation.
     """
@@ -131,10 +122,11 @@ def distill_knowledge(prompt: str, teacher_data: Dict):
     
     content = choices['logprobs']['content']
     
-    print(f"[*] Distilling {len(content)} tokens into local engine...")
+    print(f"[*] Distilling {len(content)} tokens into local engine (alpha={alpha})...")
 
     success_count = 0
     fail_count = 0
+    tokens_mapped = 0
 
     for i, token_data in enumerate(content):
         # 1. Extract sparse distribution (teacher's "thoughts")
@@ -144,21 +136,25 @@ def distill_knowledge(prompt: str, teacher_data: Dict):
             
         teacher_distribution = transform_logprobs(token_data['top_logprobs'])
         
-        # 2. Determine target (hard label) - also using hash hack
-        target_token_id = abs(hash(token_data['token'])) % 32000
+        # 2. Target token string (engine will look up ID)
+        target_token_str = token_data['token']
         
         # 3. Payload for C-Engine
         payload = {
             "teacher_logprobs": teacher_distribution,
-            "target_token": target_token_id,
-            "alpha": 0.5  # 50% Teacher, 50% Hard Label
+            "target_token_str": target_token_str,  # String, not ID
+            "target_token": -1,  # Fallback, engine uses token_str
+            "alpha": alpha
         }
         
         # 4. Push to Engine
         try:
             r = requests.post(ENGINE_URL, json=payload, timeout=5)
             if r.status_code == 200:
-                print(f"    Step {i}: Absorbed '{token_data['token']}' -> OK")
+                resp = r.json()
+                num_mapped = resp.get('num_teacher_probs', 0)
+                tokens_mapped += num_mapped
+                print(f"    Step {i}: '{token_data['token']}' -> {num_mapped} tokens mapped")
                 success_count += 1
             else:
                 print(f"    Step {i}: Engine Rejected -> {r.status_code} {r.text[:50]}")
@@ -168,6 +164,7 @@ def distill_knowledge(prompt: str, teacher_data: Dict):
             fail_count += 1
 
     print(f"\n[*] Distillation complete: {success_count} OK, {fail_count} failed")
+    print(f"[*] Total tokens mapped to local vocab: {tokens_mapped}")
 
 
 def main():
@@ -220,7 +217,7 @@ def main():
     print(f"[*] Teacher generated: {teacher_res['choices'][0]['message']['content'][:100]}...")
     
     # 2. Inject wisdom into student
-    distill_knowledge(args.prompt, teacher_res)
+    distill_knowledge(args.prompt, teacher_res, args.alpha)
 
     print("\n[*] Forge complete. Check engine logs for learning activity.")
 

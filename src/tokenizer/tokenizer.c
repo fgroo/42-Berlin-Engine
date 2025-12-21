@@ -912,3 +912,13 @@ void	tokenizer_free(t_tokenizer *t)
 		free(ti);
 	}
 }
+
+/*
+** MOPD: Public lookup function for token string -> ID
+** Used by /v1/distill endpoint to convert teacher's token strings
+** to local token IDs for proper distillation.
+*/
+int	tokenizer_lookup_id(t_tokenizer *t, const char *token_str)
+{
+	return (get_token_id(t, token_str));
+}

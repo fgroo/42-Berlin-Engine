@@ -143,16 +143,45 @@ int	parse_http_request(t_client_conn *conn)
 			conn->request.path) != 2)
 		return (-1);  /* Malformed */
 
-	/* Parse Content-Length */
+	/* [SECURITY PATCH #1] Content-Length Validation
+	** Old code: atoi(cl + 15) - VULNERABLE!
+	** - Negative values: atoi("-1") = -1 → bypasses checks
+	** - Huge values: atoi("99999999999") → undefined behavior
+	** - No digits: atoi("abc") = 0 → silent failure
+	** New code: strtol with full validation. Trust no client. */
 	conn->request.content_length = 0;
 	{
 		char	*cl;
+		char	*endptr;
+		long	val;
 		
 		cl = strstr(conn->read_buf, "Content-Length:");
 		if (!cl)
 			cl = strstr(conn->read_buf, "content-length:");
 		if (cl)
-			conn->request.content_length = atoi(cl + 15);
+		{
+			val = strtol(cl + 15, &endptr, 10);
+			/* No digits parsed? Malformed header. */
+			if (endptr == cl + 15)
+			{
+				fprintf(stderr, "[SEC] Malformed Content-Length header\n");
+				return (-1);
+			}
+			/* Negative? Hacker. */
+			if (val < 0)
+			{
+				fprintf(stderr, "[SEC] Negative Content-Length: %ld\n", val);
+				return (-1);
+			}
+			/* Too large? DoS attempt. */
+			if (val > MAX_BODY_SIZE)
+			{
+				fprintf(stderr, "[SEC] Request too large: %ld bytes (max %d)\n", 
+					val, MAX_BODY_SIZE);
+				return (-1);
+			}
+			conn->request.content_length = (int)val;
+		}
 	}
 
 	/* Parse Connection: header */
@@ -198,22 +227,37 @@ static const char	*http_status_text(int status)
 
 void	send_json_response(t_client_conn *conn, int status, const char *json)
 {
-	int	json_len;
-	int	header_len;
+	size_t	json_len;
+	size_t	buf_size;
+	int		header_len;
 
-	json_len = (int)strlen(json);
-	conn->write_buf = xmalloc(json_len + 512);
-	header_len = sprintf(conn->write_buf,
+	json_len = strlen(json);
+	/* [SECURITY PATCH #2] Response Buffer Hardening
+	** Old code: sprintf(conn->write_buf, ...) - VULNERABLE!
+	** sprintf writes until done, ignoring buffer size → stack smash.
+	** New code: snprintf with explicit size and truncation check. */
+	buf_size = json_len + 512;
+	conn->write_buf = xmalloc(buf_size);
+	header_len = snprintf(conn->write_buf, buf_size,
 		"HTTP/1.1 %d %s\r\n"
 		"Content-Type: application/json\r\n"
-		"Content-Length: %d\r\n"
+		"Content-Length: %zu\r\n"
 		"Connection: %s\r\n"
 		"\r\n",
 		status, http_status_text(status),
 		json_len,
 		conn->request.keep_alive ? "keep-alive" : "close");
+	/* Defense-in-depth: detect truncation (should never happen with +512) */
+	if (header_len < 0 || (size_t)header_len >= buf_size)
+	{
+		fprintf(stderr, "[SEC] Response header truncated! This should not happen.\n");
+		conn->write_len = 0;
+		conn->state = CONN_STATE_CLOSING;
+		return ;
+	}
+	/* Safe to append JSON body */
 	memcpy(conn->write_buf + header_len, json, json_len);
-	conn->write_len = header_len + json_len;
+	conn->write_len = header_len + (int)json_len;
 	conn->write_pos = 0;
 	conn->state = CONN_STATE_WRITING;
 }
@@ -426,11 +470,14 @@ int	server_init(t_server *srv, int port, t_transformer *engine,
 		return (-1);
 	}
 	/* Add listen socket to epoll */
+	/* [PERF PATCH #9] Use ev.data.ptr for O(1) lookup
+	** Listen socket uses NULL as marker (no t_client_conn for it)
+	** Client sockets will store pointer to their t_client_conn */
 	{
 		struct epoll_event	ev;
 
 		ev.events = EPOLLIN;
-		ev.data.fd = srv->listen_fd;
+		ev.data.ptr = NULL;  /* NULL = listen socket marker */
 		epoll_ctl(srv->epoll_fd, EPOLL_CTL_ADD, srv->listen_fd, &ev);
 	}
 #endif
@@ -499,20 +546,24 @@ int	server_run(t_server *srv)
 			break ;
 		}
 
-		i = 0;
+	i = 0;
 		while (i < n_events)
 		{
-			int	fd;
+			t_client_conn	*conn;
 
-			fd = events[i].data.fd;
+			/* [PERF PATCH #9] O(1) connection lookup via ev.data.ptr
+			** Old code: loop through all conns to find matching fd (O(N))
+			** New code: direct pointer access (O(1))
+			** NULL = listen socket (accept new connection) */
+			conn = (t_client_conn *)events[i].data.ptr;
 			
-			/* New connection */
-			if (fd == srv->listen_fd)
+			/* New connection (listen socket has NULL marker) */
+			if (conn == NULL)
 			{
 				struct sockaddr_in	client_addr;
 				socklen_t			addr_len;
 				int					client_fd;
-				t_client_conn		*conn;
+				t_client_conn		*new_conn;
 				struct epoll_event	ev;
 
 				addr_len = sizeof(client_addr);
@@ -520,14 +571,15 @@ int	server_run(t_server *srv)
 					(struct sockaddr *)&client_addr, &addr_len);
 				if (client_fd >= 0)
 				{
-					conn = find_free_conn(srv);
-					if (conn)
+					new_conn = find_free_conn(srv);
+					if (new_conn)
 					{
 						set_nonblocking(client_fd);
 						set_tcp_nodelay(client_fd);
-						conn_init(conn, client_fd);
+						conn_init(new_conn, client_fd);
+						/* [PERF PATCH #9] Store conn pointer for O(1) lookup */
 						ev.events = EPOLLIN | EPOLLET;
-						ev.data.fd = client_fd;
+						ev.data.ptr = new_conn;  /* Direct pointer! */
 						epoll_ctl(srv->epoll_fd, EPOLL_CTL_ADD, client_fd, &ev);
 						srv->n_conns++;
 					}
@@ -537,30 +589,11 @@ int	server_run(t_server *srv)
 					}
 				}
 			}
-			/* Client data */
+			/* Client data - O(1) direct access! */
 			else
 			{
-				t_client_conn	*conn;
-				int				j;
-				int				result;
-
-				/* Find connection by fd */
-				conn = NULL;
-				j = 0;
-				while (j < srv->max_conns)
-				{
-					if (srv->conns[j].fd == fd)
-					{
-						conn = &srv->conns[j];
-						break ;
-					}
-					j++;
-				}
-				if (!conn)
-				{
-					i++;
-					continue ;
-				}
+				int		result;
+				int		fd = conn->fd;  /* Get fd from connection struct */
 
 				/* Handle based on state */
 				if (events[i].events & EPOLLIN)

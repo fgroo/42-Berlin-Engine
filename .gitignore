@@ -1,14 +1,66 @@
-*safetensors
-Nested-Learning.txt
-DeepSeek-sparse-attention-model.txt
-*.py
-experiments/
-Ministral-Stuff/
-SmolLM3-Stuff/
+# =============================================================================
+# 42-BERLIN-ENGINE .gitignore
+# =============================================================================
+
+# Build Artifacts
+*.o
+*.a
+*.so
+*.dylib
+
+# Main Binaries
+42-engine
+42d
 chat
+chat_adaptive
+debug_tok
+
+# Benchmark Binaries
+bench_*
+!bench_*.c
+
+# Test Binaries
 test_tokenizer
 test_inference
 engine_test
-*.o
+tests/unit/test_arena
+tests/unit/test_tensor
+tests/unit/test_ops
+tests/unit/test_loader
+tests/unit/test_kv_cache
+tests/unit/test_fluid
+tests/benchmarks/test_*
+
+# Fluid Utilities
+fluid-*
+
+# Model Weights (too large for git)
+*.safetensors
+Ministral-Stuff/
+SmolLM3-Stuff/
+
+# Fluid Memory (persistent learning state)
+fluids/
+*.fluid
+
+# Development / Experiments
+experiments/
+*.py
+Nested-Learning.txt
+DeepSeek-sparse-attention-model.txt
+
+# External Projects
 AutoGPT/
 autogpt-classic/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*~
+
+# macOS
+.DS_Store
+
+# Docker
+docker-compose.override.yml

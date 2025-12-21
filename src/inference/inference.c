@@ -172,11 +172,19 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 		{
 			t_lsh_ctx *lsh_ctx = (t_lsh_ctx *)t->lsh_ctx;
 			t_lsh_index *lsh_idx = (t_lsh_index *)t->lsh_index;
-			// Convert K to F32 for hashing (use first KV head)
-			float k_f32[LSH_MAX_DIM];
-			for (int d = 0; d < c->head_dim && d < LSH_MAX_DIM; d++)
-				k_f32[d] = s->k[d];
-			lsh_update(lsh_idx, lsh_ctx, k_f32, c->head_dim, pos);
+			/* [FIX #1] VLA REMOVAL: Use scratch arena instead of 32KB stack array
+			** Old: float k_f32[LSH_MAX_DIM]; // 8192 floats = 32KB STACK BOMB!
+			** This caused stack overflow on deep recursion / high dim models. */
+			size_t lsh_scratch_saved = t->scratch.offset;
+			float *k_f32 = arena_try_alloc(&t->scratch, c->head_dim * sizeof(float));
+			if (k_f32)
+			{
+				for (int d = 0; d < c->head_dim; d++)
+					k_f32[d] = s->k[d];
+				lsh_update(lsh_idx, lsh_ctx, k_f32, c->head_dim, pos);
+				t->scratch.offset = lsh_scratch_saved;
+			}
+			/* On OOM: skip LSH update (graceful degradation) */
 		}
 		
 		// ========== KV CACHE EVICTION ==========
@@ -262,8 +270,16 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 			// Only add LSH candidates for positions OLDER than the window
 			if (window_start > 0 && lsh_ctx && lsh_idx && lsh_idx->n_blocks > 0)
 			{
-				// Compute query hash
-				float q_mean[LSH_MAX_DIM];
+				/* [FIX #1] VLA REMOVAL: Use scratch arena instead of 32KB stack array
+				** Old: float q_mean[LSH_MAX_DIM]; // 32KB STACK BOMB!
+				** Now uses already-saved scratch with fallback to window-only attention. */
+				float *q_mean = arena_try_alloc(&t->scratch, head_dim * sizeof(float));
+				if (!q_mean)
+				{
+					/* Fallback: window-only attention (no LSH candidates) */
+					fprintf(stderr, "[LSH] OOM for q_mean, using window-only\n");
+					goto skip_lsh_candidates;
+				}
 				memset(q_mean, 0, head_dim * sizeof(float));
 				for (int h = 0; h < c->n_heads; h++)
 					for (int d = 0; d < head_dim; d++)
@@ -296,6 +312,7 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 				}
 			}
 			
+			skip_lsh_candidates:  /* [FIX #1] Fallback label for OOM in q_mean allocation */
 			/* ===== STEP 2.5: Sort candidates for cache-friendly access ===== */
 			/* Sequential memory access enables hardware prefetcher (2-4x speedup) */
 			if (n_candidates > 1)

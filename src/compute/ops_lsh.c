@@ -274,7 +274,9 @@ void	lsh_update(t_lsh_index *idx, const t_lsh_ctx *ctx,
 			const float *key, int dim, int pos)
 {
 	t_block_acc	*acc;
-	float		centroid[LSH_MAX_DIM];
+	/* [FIX #1] VLA REMOVAL: Removed float centroid[LSH_MAX_DIM] (32KB!)
+	** Instead, compute centroid in-place in sum_buffer, hash, then reset.
+	** This is safe because sum_buffer is immediately reset after block commit. */
 	float		scale;
 	uint16_t	hash;
 	int			d;
@@ -310,19 +312,19 @@ void	lsh_update(t_lsh_index *idx, const t_lsh_ctx *ctx,
 		/* Block full? Commit to index! */
 		if (acc->count >= LSH_BLOCK_SIZE)
 		{
-			/* Compute centroid = sum / count */
+			/* Compute centroid IN-PLACE: sum_buffer[d] /= count */
 			scale = 1.0f / (float)acc->count;
 			d = 0;
 			while (d < dim && d < LSH_MAX_DIM)
 			{
-				centroid[d] = acc->sum_buffer[d] * scale;
+				acc->sum_buffer[d] *= scale;
 				d++;
 			}
-			/* Hash centroid */
-			hash = lsh_hash(ctx, centroid);
+			/* Hash centroid (now in sum_buffer) */
+			hash = lsh_hash(ctx, acc->sum_buffer);
 			/* Insert into index */
 			lsh_insert_block(idx, hash, acc->start_pos, acc->count);
-			/* Reset accumulator */
+			/* Reset accumulator (clears sum_buffer for next block) */
 			memset(acc->sum_buffer, 0, sizeof(acc->sum_buffer));
 			acc->count = 0;
 		}
@@ -332,18 +334,29 @@ void	lsh_update(t_lsh_index *idx, const t_lsh_ctx *ctx,
 /*
 ** Find candidate blocks using BUCKET LOOKUP (not linear scan!)
 ** Multi-probe LSH: Check exact bucket + nearby buckets via bit flips
+**
+** [FIX #6] O(1) BITMAP DEDUPLICATION:
+** Old code used O(N) linear scan per candidate → O(N²) total.
+** New code uses 512-byte bitmap → O(1) per candidate → O(N) total.
 */
+#define LSH_BITMAP_SIZE ((LSH_MAX_BLOCKS + 63) / 64)  /* 64 uint64_t = 512 bytes */
+
 int	lsh_find_candidates(const t_lsh_index *idx, uint16_t query_hash,
 		int *block_ids, int max_blocks)
 {
 	int			n_found;
-	int			b;
 	int			block_id;
 	int			probe;
 	int			bit;
 	uint16_t	probed_hash;
 	int			bucket;
+	/* [FIX #6] Bitmap for O(1) duplicate detection (512 bytes, stack-safe) */
+	uint64_t	seen[LSH_BITMAP_SIZE];
+	int			w_idx;
+	int			b_idx;
 
+	/* Zero bitmap (memset to avoid loop) */
+	memset(seen, 0, sizeof(seen));
 	n_found = 0;
 	
 	/* Multi-probe LSH: probe exact bucket + bit-flip neighbors */
@@ -371,13 +384,14 @@ int	lsh_find_candidates(const t_lsh_index *idx, uint16_t query_hash,
 			if (lsh_hamming_distance(query_hash, idx->block_hashes[block_id])
 				<= LSH_HAMMING_RADIUS)
 			{
-				/* Check for duplicates (multi-probe may find same block) */
-				int dup = 0;
-				for (b = 0; b < n_found && !dup; b++)
-					if (block_ids[b] == block_id)
-						dup = 1;
-				if (!dup)
+				/* [FIX #6] O(1) bitmap duplicate check */
+				w_idx = block_id / 64;
+				b_idx = block_id % 64;
+				if (!(seen[w_idx] & (1ULL << b_idx)))
+				{
+					seen[w_idx] |= (1ULL << b_idx);  /* Mark as seen */
 					block_ids[n_found++] = block_id;
+				}
 			}
 			block_id = idx->chain_next[block_id];
 		}

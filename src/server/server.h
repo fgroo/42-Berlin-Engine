@@ -43,6 +43,10 @@
 # define SERVER_BUFFER_SIZE      65536
 # define SERVER_MAX_TOKENS       4096
 
+/* [SECURITY] Request size limits - prevent DoS and buffer overflow attacks */
+# define MAX_BODY_SIZE           (1024 * 1024 * 10)  /* 10 MB max request body */
+# define MAX_HEADER_SIZE         8192                 /* 8 KB max headers */
+
 /* Connection states */
 typedef enum e_conn_state
 {

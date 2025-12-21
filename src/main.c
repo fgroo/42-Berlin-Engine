@@ -81,24 +81,21 @@ typedef struct s_cli_config
 /* Global state for signal handler */
 static t_transformer	*g_transformer = NULL;
 static const char		*g_fluid_path = NULL;
-static volatile int		g_interrupted = 0;
+/* [FIX #2] ASYNC-SIGNAL-SAFETY: Use sig_atomic_t (guaranteed atomic access)
+** CRITICAL: Signal handlers must ONLY set flags - no IO, no malloc, no complex ops!
+** Previous code called fluid_save() in handler - deadlock risk with malloc(). */
+static volatile sig_atomic_t	g_shutdown_requested = 0;
 
 /* ============================================================================
-** Signal Handler (Safe Shutdown)
-** ============================================================================ */
+** Signal Handler (ASYNC-SIGNAL-SAFE)
+** ============================================================================
+** RULES: Only set flags. Never call: printf, malloc, free, fopen, etc.
+** See signal-safety(7) for the list of async-signal-safe functions. */
 
 static void	signal_handler(int sig)
 {
 	(void)sig;
-	g_interrupted = 1;
-	printf("\n[SIGNAL] Caught SIGINT. Saving state...\n");
-	if (g_transformer && g_fluid_path)
-	{
-		if (fluid_save(g_transformer, g_fluid_path) == 0)
-			printf("[SIGNAL] Brain saved to %s\n", g_fluid_path);
-	}
-	printf("[SIGNAL] Graceful shutdown complete.\n");
-	exit(0);
+	g_shutdown_requested = 1;  /* Only set flag - that's it! */
 }
 
 /* ============================================================================
@@ -299,7 +296,7 @@ static int	run_chat_mode(t_transformer *t, t_tokenizer *tok,
 	}
 	printf("\n");
 
-	while (!g_interrupted)
+	while (!g_shutdown_requested)
 	{
 		printf(">> ");
 		if (!fgets(input_buf, sizeof(input_buf), stdin))
@@ -394,7 +391,7 @@ static int	run_chat_mode(t_transformer *t, t_tokenizer *tok,
 		int repeat_count = 0;
 
 		/* Generate */
-		for (int gen = 0; gen < MAX_GEN_LEN && !g_interrupted; gen++)
+		for (int gen = 0; gen < MAX_GEN_LEN && !g_shutdown_requested; gen++)
 		{
 			float *logits = transformer_forward(t, current_token, ctx->session_pos);
 
@@ -496,7 +493,7 @@ static int	run_bench_mode(t_transformer *t, t_tokenizer *tok,
 	free(tokens);
 
 	clock_gettime(CLOCK_MONOTONIC, &start);
-	for (int i = 0; i < steps && !g_interrupted; i++)
+	for (int i = 0; i < steps && !g_shutdown_requested; i++)
 	{
 		float *logits = transformer_forward(t, current_token, ctx->session_pos);
 		t_tensor logits_t = {.data = logits, .size = t->config.vocab_size, .dtype = DTYPE_F32};
@@ -721,6 +718,17 @@ int	main(int argc, char **argv)
 		ret = run_forge_mode(&t, &tok, &ctx);
 	else
 		ret = run_chat_mode(&t, &tok, &ctx, cfg.fluid_path);
+
+	/* [FIX #2] GRACEFUL SHUTDOWN: Save state AFTER main loop exits
+	** This is the SAFE place to do IO - not in the signal handler!
+	** The signal handler only sets g_shutdown_requested, we react here. */
+	if (g_shutdown_requested && g_fluid_path)
+	{
+		printf("\n[SHUTDOWN] Signal received. Saving state...\n");
+		if (fluid_save(&t, g_fluid_path) == 0)
+			printf("[SHUTDOWN] Brain saved to %s\n", g_fluid_path);
+		printf("[SHUTDOWN] Graceful shutdown complete.\n");
+	}
 
 	/* Cleanup */
 	transformer_free(&t);

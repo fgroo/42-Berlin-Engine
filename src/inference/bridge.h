@@ -67,6 +67,13 @@ void	bridge_translate_batch(t_token_bridge *bridge, const int *draft_ids,
 void	bridge_stats(t_token_bridge *bridge);
 
 /*
+** Reverse translate: target token ID to draft token ID.
+** Used to sync draft model with target's accepted tokens.
+** Note: This is NOT cached (less frequent operation).
+*/
+int		bridge_reverse_translate(t_token_bridge *bridge, int target_id);
+
+/*
 ** Free bridge resources.
 */
 void	bridge_free(t_token_bridge *bridge);

@@ -52,17 +52,69 @@ int	bridge_init(t_token_bridge *bridge, t_tokenizer *draft_tok,
 }
 
 /*
+** ============================================================================
+** TOKEN STRING NORMALIZATION
+** ============================================================================
+** SentencePiece uses "Lower One Eighth Block" (U+2581 / ▁) as word boundary.
+** Standard tokenizers use ASCII space (0x20).
+** We normalize both directions to maximize match rate.
+**
+** U+2581 = 0xE2 0x96 0x81 (UTF-8)
+** ============================================================================
+*/
+
+/* Static buffer for normalized strings (thread-local for safety) */
+static __thread char	g_norm_buf[512];
+
+/*
+** Normalize token string for cross-tokenizer matching.
+** - Replaces U+2581 (▁) with ASCII space
+** - Handles Byte-Level BPE escape sequences if needed
+*/
+static const char	*normalize_token_str(const char *raw)
+{
+	const unsigned char	*src;
+	char				*dst;
+	int					i;
+
+	if (!raw)
+		return (NULL);
+	src = (const unsigned char *)raw;
+	dst = g_norm_buf;
+	i = 0;
+	while (*src && i < 510)
+	{
+		/* Check for U+2581: 0xE2 0x96 0x81 */
+		if (src[0] == 0xE2 && src[1] == 0x96 && src[2] == 0x81)
+		{
+			dst[i++] = ' ';  /* Replace with ASCII space */
+			src += 3;
+		}
+		/* Check for reverse: if target uses ▁ but draft uses space */
+		/* We keep ASCII space as-is, the target lookup handles it */
+		else
+		{
+			dst[i++] = *src++;
+		}
+	}
+	dst[i] = '\0';
+	return (g_norm_buf);
+}
+
+/*
 ** Translate a draft token ID to the target tokenizer's ID.
 ** Uses caching to avoid repeated decode/encode cycles.
 **
 ** Flow:
 ** 1. Check cache (O(1))
-** 2. If miss: decode draft_id -> string -> encode to target_id
-** 3. Cache the result
+** 2. If miss: decode draft_id -> normalize -> encode to target_id
+** 3. If still no match: try without normalization (for exact matches)
+** 4. Cache the result
 */
 int	bridge_translate(t_token_bridge *bridge, int draft_id)
 {
 	const char	*token_str;
+	const char	*normalized;
 	int			target_id;
 
 	/* Bounds check */
@@ -84,10 +136,17 @@ int	bridge_translate(t_token_bridge *bridge, int draft_id)
 		bridge->cache[draft_id] = BRIDGE_NO_MATCH;
 		return (BRIDGE_NO_MATCH);
 	}
-	/* Step 2: Encode string to target ID */
-	target_id = tokenizer_lookup_id(bridge->target_tok, token_str);
-	/* Step 3: Cache the result */
-	/* Note: target_id might be unk_id (0), which is still valid for caching */
+	/* Step 2: Normalize and encode to target ID */
+	normalized = normalize_token_str(token_str);
+	target_id = tokenizer_lookup_id(bridge->target_tok, normalized);
+	/* Step 3: If normalized lookup returned UNK, try raw string */
+	if (target_id == bridge->target_tok->unk_id && normalized != token_str)
+	{
+		int raw_id = tokenizer_lookup_id(bridge->target_tok, token_str);
+		if (raw_id != bridge->target_tok->unk_id)
+			target_id = raw_id;
+	}
+	/* Step 4: Cache the result */
 	bridge->cache[draft_id] = target_id;
 	return (target_id);
 }
@@ -127,6 +186,41 @@ void	bridge_stats(t_token_bridge *bridge)
 		hit_rate = 0.0f;
 	printf("[BRIDGE] Stats: %d hits, %d misses, %.1f%% hit rate\n",
 		bridge->cache_hits, bridge->cache_misses, hit_rate);
+}
+
+/*
+** Reverse translate: target token ID to draft token ID.
+** Used to sync draft model with target's accepted tokens.
+**
+** This is NOT cached because:
+** 1. It's called less frequently (only on accepted tokens)
+** 2. We'd need a second cache of target_vocab_size
+*/
+int	bridge_reverse_translate(t_token_bridge *bridge, int target_id)
+{
+	const char	*token_str;
+	const char	*normalized;
+	int			draft_id;
+
+	if (!bridge || target_id < 0)
+		return (BRIDGE_NO_MATCH);
+	if (target_id >= bridge->target_tok->vocab_size)
+		return (BRIDGE_NO_MATCH);
+	/* Decode target ID to string */
+	token_str = tokenizer_decode(bridge->target_tok, target_id);
+	if (!token_str || token_str[0] == '\0')
+		return (BRIDGE_NO_MATCH);
+	/* Normalize and lookup in draft tokenizer */
+	normalized = normalize_token_str(token_str);
+	draft_id = tokenizer_lookup_id(bridge->draft_tok, normalized);
+	/* Fallback to raw string */
+	if (draft_id == bridge->draft_tok->unk_id && normalized != token_str)
+	{
+		int raw_id = tokenizer_lookup_id(bridge->draft_tok, token_str);
+		if (raw_id != bridge->draft_tok->unk_id)
+			draft_id = raw_id;
+	}
+	return (draft_id);
 }
 
 /*

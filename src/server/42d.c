@@ -31,6 +31,7 @@
 
 #include "server/server.h"
 #include "inference/inference.h"
+#include "inference/speculate.h"
 #include "tokenizer/tokenizer.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -56,10 +57,16 @@ static void	print_usage(const char *prog)
 	printf("  -t, --tokenizer PATH   Path to tokenizer.json (required)\n");
 	printf("  -c, --config PATH      Path to config.json\n");
 	printf("  -p, --port PORT        HTTP port (default: 8080)\n");
+	printf("  --draft PATH           Path to draft model for MTP (optional)\n");
+	printf("  --draft-tokenizer PATH Path to draft tokenizer (required with --draft)\n");
 	printf("  -h, --help             Show this help\n");
 	printf("\n");
 	printf("Example:\n");
 	printf("  %s -m model.safetensors -t tokenizer.json -p 8080\n", prog);
+	printf("\n");
+	printf("MTP (Speculative Decoding):\n");
+	printf("  %s -m ministral.safetensors -t ministral-tok.json \\\n", prog);
+	printf("      --draft gemma.safetensors --draft-tokenizer gemma-tok.json\n");
 	printf("\n");
 }
 
@@ -68,17 +75,26 @@ int	main(int argc, char **argv)
 	char			*model_path;
 	char			*tokenizer_path;
 	char			*config_path;
+	char			*draft_path;
+	char			*draft_tok_path;
 	int				port;
 	int				i;
 	t_transformer	transformer;
+	t_transformer	draft_transformer;
 	t_tokenizer		tokenizer;
+	t_tokenizer		draft_tokenizer;
+	t_mtp_engine	mtp_engine;
 	t_server		server;
+	int				has_draft;
 
 	/* Parse arguments */
 	model_path = NULL;
 	tokenizer_path = NULL;
 	config_path = NULL;
+	draft_path = NULL;
+	draft_tok_path = NULL;
 	port = SERVER_DEFAULT_PORT;
+	has_draft = 0;
 	i = 1;
 	while (i < argc)
 	{
@@ -102,6 +118,14 @@ int	main(int argc, char **argv)
 		{
 			port = atoi(argv[++i]);
 		}
+		else if (strcmp(argv[i], "--draft") == 0 && i + 1 < argc)
+		{
+			draft_path = argv[++i];
+		}
+		else if (strcmp(argv[i], "--draft-tokenizer") == 0 && i + 1 < argc)
+		{
+			draft_tok_path = argv[++i];
+		}
 		else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0)
 		{
 			print_usage(argv[0]);
@@ -120,6 +144,12 @@ int	main(int argc, char **argv)
 	if (!model_path || !tokenizer_path)
 	{
 		fprintf(stderr, "Error: -m (model) and -t (tokenizer) are required\n\n");
+		print_usage(argv[0]);
+		return (1);
+	}
+	if (draft_path && !draft_tok_path)
+	{
+		fprintf(stderr, "Error: --draft requires --draft-tokenizer\n\n");
 		print_usage(argv[0]);
 		return (1);
 	}
@@ -144,6 +174,47 @@ int	main(int argc, char **argv)
 	printf("[42d] Model loaded. Layers: %d, Dim: %d\n",
 		transformer.config.n_layers, transformer.config.dim);
 
+	/* Initialize optional draft model for MTP */
+	if (draft_path)
+	{
+		printf("[42d] Loading draft tokenizer: %s\n", draft_tok_path);
+		if (tokenizer_init(&draft_tokenizer, draft_tok_path) != 0)
+		{
+			fprintf(stderr, "Warning: Failed to load draft tokenizer, MTP disabled\n");
+		}
+		else
+		{
+			printf("[42d] Loading draft model: %s\n", draft_path);
+			if (transformer_init(&draft_transformer, draft_path, NULL) != 0)
+			{
+				fprintf(stderr, "Warning: Failed to load draft model, MTP disabled\n");
+				tokenizer_free(&draft_tokenizer);
+			}
+			else
+			{
+				has_draft = 1;
+				printf("[42d] Draft model loaded. Layers: %d, Dim: %d\n",
+					draft_transformer.config.n_layers, draft_transformer.config.dim);
+			}
+		}
+	}
+
+	/* Initialize MTP engine */
+	if (has_draft)
+	{
+		if (mtp_init(&mtp_engine, &transformer, &draft_transformer,
+				&tokenizer, &draft_tokenizer) != 0)
+		{
+			fprintf(stderr, "Warning: MTP init failed, using standard mode\n");
+			has_draft = 0;
+		}
+	}
+	else
+	{
+		/* No draft model - init MTP in fallback mode */
+		mtp_init(&mtp_engine, &transformer, NULL, &tokenizer, NULL);
+	}
+
 	/* Set up signal handlers */
 	signal(SIGINT, signal_handler);
 	signal(SIGTERM, signal_handler);
@@ -164,6 +235,13 @@ int	main(int argc, char **argv)
 
 	/* Cleanup */
 	server_shutdown(&server);
+	mtp_stats(&mtp_engine);
+	mtp_free(&mtp_engine);
+	if (has_draft)
+	{
+		transformer_free(&draft_transformer);
+		tokenizer_free(&draft_tokenizer);
+	}
 	transformer_free(&transformer);
 	tokenizer_free(&tokenizer);
 	printf("[42d] Goodbye.\n");

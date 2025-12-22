@@ -157,6 +157,12 @@ int	mtp_generate(t_mtp_engine *eng, int prompt_token, int pos, int *out_tokens)
 	i = 0;
 	while (i < eng->n_draft && i < MTP_MAX_DRAFT)
 	{
+		/* DEBUG: Verify we're using draft, not target (disabled for production)
+		if (i == 0)
+			printf("[MTP_DEBUG] Drafting with: dim=%d, layers=%d, wq=%p\n",
+				eng->draft->config.dim, eng->draft->config.n_layers,
+				(void *)eng->draft->weights.layers[0].wq);
+		*/
 		logits = transformer_forward(eng->draft, curr_gemma, pos + i);
 		max_id = 0;
 		max_val = logits[0];
@@ -195,9 +201,40 @@ int	mtp_generate(t_mtp_engine *eng, int prompt_token, int pos, int *out_tokens)
 				target_pred = j;
 			}
 		}
-		if (target_pred == draft_tokens_target[i])
+		
+		/* ================================================================
+		** SEMANTIC VERIFICATION (Heterogeneous Tokenizer Support)
+		** ================================================================
+		** Different tokenizers encode the same text to different IDs.
+		** We first try fast ID comparison, then fall back to string match.
+		** ================================================================ */
+		
+		int is_match = (target_pred == draft_tokens_target[i]);
+		
+		/* Semantic fallback: compare decoded strings */
+		if (!is_match)
 		{
-			/* ACCEPT: Add to output buffer */
+			/* Decode using ORIGINAL tokenizers for accuracy */
+			const char *s_draft = tokenizer_decode(eng->draft_tok, draft_tokens_gemma[i]);
+			const char *s_target = tokenizer_decode(eng->target_tok, target_pred);
+			
+			if (s_draft && s_target && strcmp(s_draft, s_target) == 0)
+			{
+				is_match = 1;
+				printf("\033[0;33m[MTP SEMANTIC] '%s' matched (draft_id=%d, target_id=%d)\033[0m\n",
+					s_draft, draft_tokens_gemma[i], target_pred);
+			}
+			else
+			{
+				/* Debug: show what was rejected */
+				printf("[MTP DIAG] Pos+%d | Draft: '%s' vs Target: '%s' -> REJECT\n",
+					i, s_draft ? s_draft : "(null)", s_target ? s_target : "(null)");
+			}
+		}
+		
+		if (is_match)
+		{
+			/* ACCEPT: Use TARGET's ID for KV cache consistency */
 			out_tokens[n_out++] = target_pred;
 			eng->total_accepted++;
 			check_input = target_pred;

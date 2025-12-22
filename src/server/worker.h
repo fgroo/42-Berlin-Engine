@@ -15,6 +15,7 @@
 
 # include "queue.h"
 # include "inference/inference.h"
+# include "inference/speculate.h"
 # include "tokenizer/tokenizer.h"
 # include <pthread.h>
 
@@ -38,8 +39,9 @@
 typedef struct s_worker_ctx
 {
 	t_job_queue		*queue;      /* Job queue to consume from */
-	t_transformer	*engine;     /* Inference engine */
+	t_transformer	*engine;     /* Inference engine (target) */
 	t_tokenizer		*tokenizer;  /* Tokenizer */
+	t_mtp_engine	*mtp;        /* MTP engine (NULL = disabled) */
 	int				running;     /* 1 = running, 0 = should exit */
 }	t_worker_ctx;
 

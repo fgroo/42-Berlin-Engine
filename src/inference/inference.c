@@ -69,13 +69,20 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 	if (s->token_history && pos >= 0 && pos < c->seq_len)
 		s->token_history[pos] = token;
 
+	/* DEBUG: Trace which model is being called (disabled for production)
+	printf("[FWD] Entry: dim=%d, layers=%d, heads=%d, token=%d, pos=%d\n",
+		c->dim, c->n_layers, c->n_heads, token, pos);
+	*/
+
 	// 1. Embedding
 	t_tensor *emb = t->weights.token_embedding;
 	if (!emb || !emb->data) {
+		printf("[FWD] FATAL: No embedding data!\n");
 		exit(1);
 	}
 	uint16_t *emb_data = (uint16_t *)emb->data;
 	uint16_t *token_vec = emb_data + token * c->dim;
+	/* printf("[FWD] Embedding OK (vocab offset=%d)\n", token * c->dim); */
 	
 	// [HOTFIX] Issue #5: Use SIMD for BF16→F32 conversion (was scalar)
 	simd_bf16_to_f32(s->x, token_vec, c->dim);

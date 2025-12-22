@@ -116,6 +116,7 @@ int	bridge_translate(t_token_bridge *bridge, int draft_id)
 	const char	*token_str;
 	const char	*normalized;
 	int			target_id;
+	char		buf[520];  /* Must be larger than g_norm_buf (512) + 1 */
 
 	/* Bounds check */
 	if (draft_id < 0 || draft_id >= bridge->cache_size)
@@ -130,23 +131,62 @@ int	bridge_translate(t_token_bridge *bridge, int draft_id)
 	bridge->cache_misses++;
 	/* Step 1: Decode draft ID to string */
 	token_str = tokenizer_decode(bridge->draft_tok, draft_id);
+	
+	/* Forensic debug disabled for production:
+	printf("[BRIDGE TRACE] draft_id=%d -> decode='%s'\n",
+		draft_id, token_str ? token_str : "(null)");
+	*/
+	
 	if (!token_str || token_str[0] == '\0')
 	{
 		/* Special token or empty - mark as no match */
 		bridge->cache[draft_id] = BRIDGE_NO_MATCH;
 		return (BRIDGE_NO_MATCH);
 	}
-	/* Step 2: Normalize and encode to target ID */
+	/* Step 2: Normalize (▁ -> space) */
 	normalized = normalize_token_str(token_str);
+	
+	/* ================================================================
+	** SMART HEURISTIC TOKEN TRANSLATION
+	** ================================================================
+	** Different tokenizers encode word boundaries differently.
+	** We try multiple strategies to maximize match rate.
+	** ================================================================ */
+	
+	/* STRATEGY A: Exact normalized match */
 	target_id = tokenizer_lookup_id(bridge->target_tok, normalized);
-	/* Step 3: If normalized lookup returned UNK, try raw string */
-	if (target_id == bridge->target_tok->unk_id && normalized != token_str)
+	if (target_id > 0 && target_id != bridge->target_tok->unk_id)
+		goto cache_and_return;
+	
+	/* STRATEGY B: Prepend space (Gemma "is" -> Ministral " is") */
+	if (normalized[0] != ' ' && normalized[0] != '\0')
 	{
-		int raw_id = tokenizer_lookup_id(bridge->target_tok, token_str);
-		if (raw_id != bridge->target_tok->unk_id)
-			target_id = raw_id;
+		snprintf(buf, sizeof(buf), " %s", normalized);
+		target_id = tokenizer_lookup_id(bridge->target_tok, buf);
+		if (target_id > 0 && target_id != bridge->target_tok->unk_id)
+			goto cache_and_return;
 	}
-	/* Step 4: Cache the result */
+	
+	/* STRATEGY C: Trim leading space (Gemma " ," -> Ministral ",") */
+	if (normalized[0] == ' ' && normalized[1] != '\0')
+	{
+		target_id = tokenizer_lookup_id(bridge->target_tok, normalized + 1);
+		if (target_id > 0 && target_id != bridge->target_tok->unk_id)
+			goto cache_and_return;
+	}
+	
+	/* STRATEGY D: Try raw string without normalization */
+	if (normalized != token_str)
+	{
+		target_id = tokenizer_lookup_id(bridge->target_tok, token_str);
+		if (target_id > 0 && target_id != bridge->target_tok->unk_id)
+			goto cache_and_return;
+	}
+	
+	/* All strategies failed - use UNK as fallback */
+	target_id = 0;
+	
+cache_and_return:
 	bridge->cache[draft_id] = target_id;
 	return (target_id);
 }

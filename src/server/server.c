@@ -623,7 +623,11 @@ int	server_init(t_server *srv, int port, t_transformer *engine,
 	struct sockaddr_in	addr;
 	int					i;
 
+	/* Save mtp pointer before zeroing (set by caller before server_init) */
+	struct s_mtp_engine *saved_mtp = srv->mtp;
+
 	memset(srv, 0, sizeof(*srv));
+	srv->mtp = saved_mtp;  /* Restore MTP pointer */
 	srv->port = port;
 	srv->engine = engine;
 	srv->tokenizer = tok;
@@ -704,6 +708,11 @@ int	server_init(t_server *srv, int port, t_transformer *engine,
 	srv->worker_ctx->queue = srv->queue;
 	srv->worker_ctx->engine = engine;
 	srv->worker_ctx->tokenizer = tok;
+	srv->worker_ctx->mtp = (t_mtp_engine *)srv->mtp;  /* Wire MTP for burst gen */
+	/* Disabled for production:
+	printf("[DEBUG] server.c: srv->mtp = %p, worker_ctx->mtp = %p\n",
+		(void *)srv->mtp, (void *)srv->worker_ctx->mtp);
+	*/
 	if (worker_start(srv->worker_ctx, &srv->worker_thread) != 0)
 	{
 		fprintf(stderr, "Failed to start worker thread\n");

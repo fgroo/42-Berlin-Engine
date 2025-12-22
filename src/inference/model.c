@@ -40,24 +40,38 @@ static int	load_config(t_transformer_config *conf, const char *path)
 	char line[1024];
 	int in_text_config = 0;
 	int in_rope_params = 0;
+	int in_vision_config = 0;  /* Skip vision encoder config */
 	while (fgets(line, sizeof(line), f))
 	{
+		/* Track nested config blocks */
 		if (strstr(line, "\"text_config\": {")) {
 			in_text_config = 1;
+			continue;
+		}
+		if (strstr(line, "\"vision_config\": {")) {
+			in_vision_config = 1;
 			continue;
 		}
 		if (in_text_config && strstr(line, "\"rope_parameters\": {")) {
 			in_rope_params = 1;
 			continue;
 		}
+		/* Close blocks on "}," */
 		if (in_rope_params && strstr(line, "},")) {
 			in_rope_params = 0;
+			continue;
+		}
+		if (in_vision_config && strstr(line, "},")) {
+			in_vision_config = 0;
 			continue;
 		}
 		if (in_text_config && !in_rope_params && strstr(line, "},")) {
 			in_text_config = 0;
 			continue;
 		}
+		/* SKIP VISION CONFIG ENTIRELY */
+		if (in_vision_config)
+			continue;
 
 		if (in_rope_params)
 		{
@@ -70,6 +84,7 @@ static int	load_config(t_transformer_config *conf, const char *path)
 		}
 		else if (in_text_config)
 		{
+			/* VLM format (Ministral): keys nested under "text_config" */
 			SAFE_PARSE_INT(line, "\"hidden_size\":", conf->dim);
 			SAFE_PARSE_INT(line, "\"intermediate_size\":", conf->hidden_dim);
 			SAFE_PARSE_INT(line, "\"num_hidden_layers\":", conf->n_layers);
@@ -77,6 +92,24 @@ static int	load_config(t_transformer_config *conf, const char *path)
 			SAFE_PARSE_INT(line, "\"num_key_value_heads\":", conf->n_kv_heads);
 			SAFE_PARSE_INT(line, "\"vocab_size\":", conf->vocab_size);
 			SAFE_PARSE_INT(line, "\"head_dim\":", conf->head_dim);
+		}
+		else
+		{
+			/* HuggingFace root level (Gemma, Llama, Qwen, etc) */
+			SAFE_PARSE_INT(line, "\"hidden_size\":", conf->dim);
+			SAFE_PARSE_INT(line, "\"intermediate_size\":", conf->hidden_dim);
+			SAFE_PARSE_INT(line, "\"num_hidden_layers\":", conf->n_layers);
+			SAFE_PARSE_INT(line, "\"num_attention_heads\":", conf->n_heads);
+			SAFE_PARSE_INT(line, "\"num_key_value_heads\":", conf->n_kv_heads);
+			SAFE_PARSE_INT(line, "\"vocab_size\":", conf->vocab_size);
+			SAFE_PARSE_INT(line, "\"head_dim\":", conf->head_dim);
+			SAFE_PARSE_FLOAT(line, "\"rope_theta\":", conf->rope_theta);
+			SAFE_PARSE_FLOAT(line, "\"rms_norm_eps\":", conf->norm_eps);
+			/* LLaMA-style keys (params.json) as additional fallbacks */
+			SAFE_PARSE_INT(line, "\"dim\":", conf->dim);
+			SAFE_PARSE_INT(line, "\"n_layers\":", conf->n_layers);
+			SAFE_PARSE_INT(line, "\"n_heads\":", conf->n_heads);
+			SAFE_PARSE_INT(line, "\"n_kv_heads\":", conf->n_kv_heads);
 		}
 	}
 	fclose(f);
@@ -171,30 +204,72 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 			{
 				t_layer_weights *l = &t->weights.layers[layer_idx];
 				
-				if (strstr(name, "attention.wq.weight")) {
+				/* ============================================================
+				** UNIVERSAL TENSOR MAPPING (LLaMA + HuggingFace/Gemma Support)
+				** ============================================================ */
+				
+				/* 1. ATTENTION */
+				if (strstr(name, "attention.wq") || strstr(name, "self_attn.q_proj")) {
 					l->wq = tensor;
 				}
-				else if (strstr(name, "attention.wk.weight")) l->wk = tensor;
-				else if (strstr(name, "attention.wv.weight")) l->wv = tensor;
-				else if (strstr(name, "attention.wo.weight")) l->wo = tensor;
-				else if (strstr(name, "feed_forward.w1.weight")) l->w1 = tensor;
-				else if (strstr(name, "feed_forward.w2.weight")) l->w2 = tensor;
-				else if (strstr(name, "feed_forward.w3.weight")) l->w3 = tensor;
-				else if (strstr(name, "attention_norm.weight")) l->attention_norm = tensor;
-				else if (strstr(name, "ffn_norm.weight")) l->ffn_norm = tensor;
+				else if (strstr(name, "attention.wk") || strstr(name, "self_attn.k_proj")) {
+					l->wk = tensor;
+				}
+				else if (strstr(name, "attention.wv") || strstr(name, "self_attn.v_proj")) {
+					l->wv = tensor;
+				}
+				else if (strstr(name, "attention.wo") || strstr(name, "self_attn.o_proj")) {
+					l->wo = tensor;
+				}
+				
+				/* 2. FEED FORWARD (LLaMA: w1=Gate, w2=Down, w3=Up) */
+				else if (strstr(name, "feed_forward.w1") || strstr(name, "mlp.gate_proj")) {
+					l->w1 = tensor;  /* Gate */
+				}
+				else if (strstr(name, "feed_forward.w2") || strstr(name, "mlp.down_proj")) {
+					l->w2 = tensor;  /* Down */
+				}
+				else if (strstr(name, "feed_forward.w3") || strstr(name, "mlp.up_proj")) {
+					l->w3 = tensor;  /* Up */
+				}
+				
+				/* 3. NORMS (LLaMA vs HuggingFace) */
+				else if (strstr(name, "attention_norm") || strstr(name, "input_layernorm")) {
+					l->attention_norm = tensor;
+				}
+				else if (strstr(name, "ffn_norm") || strstr(name, "post_attention_layernorm")) {
+					l->ffn_norm = tensor;
+				}
 			}
 		}
-		// Global weights
-		else if (strcmp(name, "tok_embeddings.weight") == 0) t->weights.token_embedding = tensor;
-		else if (strcmp(name, "norm.weight") == 0) t->weights.norm = tensor;
-		else if (strcmp(name, "output.weight") == 0) t->weights.output = tensor;
+		/* 4. GLOBAL WEIGHTS */
+		else if (strcmp(name, "tok_embeddings.weight") == 0 ||
+				 strcmp(name, "model.embed_tokens.weight") == 0) {
+			t->weights.token_embedding = tensor;
+		}
+		else if (strcmp(name, "norm.weight") == 0 ||
+				 strcmp(name, "model.norm.weight") == 0) {
+			t->weights.norm = tensor;
+		}
+		else if (strcmp(name, "output.weight") == 0 ||
+				 strcmp(name, "lm_head.weight") == 0) {
+			t->weights.output = tensor;
+		}
 
+		/* Disabled for production - weight loading is very verbose:
 		printf("Loaded: %s [%d, %d]\n", name, tensor->shape[0], tensor->shape[1]);
 		if (strcmp(name, "model.layers.0.self_attn.q_proj.weight") == 0) {
 			printf("[DEBUG] Shape Check: %s -> [%d, %d]\n", name, tensor->shape[0], tensor->shape[1]);
 		}
+		*/
 		// Assuming map_set is a function that stores all tensors by name
 		// map_set(t->weights, name, tensor);
+	}
+
+	/* Weight Tying: Link output head to embeddings if missing */
+	if (!t->weights.output && t->weights.token_embedding) {
+		printf("[LOADER] Weight Tying detected. Linking output → embeddings.\n");
+		t->weights.output = t->weights.token_embedding;
 	}
 
 	// Handle tied embeddings if output weight is missing

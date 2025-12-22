@@ -77,6 +77,7 @@ int	main(int argc, char **argv)
 	char			*config_path;
 	char			*draft_path;
 	char			*draft_tok_path;
+	char			*draft_config_path;
 	int				port;
 	int				i;
 	t_transformer	transformer;
@@ -93,6 +94,7 @@ int	main(int argc, char **argv)
 	config_path = NULL;
 	draft_path = NULL;
 	draft_tok_path = NULL;
+	draft_config_path = NULL;
 	port = SERVER_DEFAULT_PORT;
 	has_draft = 0;
 	i = 1;
@@ -125,6 +127,10 @@ int	main(int argc, char **argv)
 		else if (strcmp(argv[i], "--draft-tokenizer") == 0 && i + 1 < argc)
 		{
 			draft_tok_path = argv[++i];
+		}
+		else if (strcmp(argv[i], "--draft-config") == 0 && i + 1 < argc)
+		{
+			draft_config_path = argv[++i];
 		}
 		else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0)
 		{
@@ -185,7 +191,7 @@ int	main(int argc, char **argv)
 		else
 		{
 			printf("[42d] Loading draft model: %s\n", draft_path);
-			if (transformer_init(&draft_transformer, draft_path, NULL) != 0)
+			if (transformer_init(&draft_transformer, draft_path, draft_config_path) != 0)
 			{
 				fprintf(stderr, "Warning: Failed to load draft model, MTP disabled\n");
 				tokenizer_free(&draft_tokenizer);
@@ -222,6 +228,11 @@ int	main(int argc, char **argv)
 
 	/* Initialize and run server */
 	g_server = &server;
+	server.mtp = (struct s_mtp_engine *)&mtp_engine;  /* Wire MTP for burst gen */
+	/* Disabled for production:
+	printf("[DEBUG] 42d.c: server.mtp = %p, is_speculative = %d\n",
+		(void *)server.mtp, mtp_engine.is_speculative);
+	*/
 	if (server_init(&server, port, &transformer, &tokenizer) != 0)
 	{
 		fprintf(stderr, "Error: Failed to start server\n");

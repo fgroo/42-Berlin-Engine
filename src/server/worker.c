@@ -322,7 +322,7 @@ void	*worker_routine(void *arg)
 		logits = transformer_forward(ctx->engine, tokens[n_tokens - 1],
 				n_tokens - 1);
 
-		/* 6. Generation loop with streaming */
+		/* 6. Generation loop with streaming (MTP Burst Mode) */
 		full_len = 0;
 		full_response[0] = '\0';
 		gen_count = 0;
@@ -330,16 +330,11 @@ void	*worker_routine(void *arg)
 		if (max_gen > 1024)
 			max_gen = 1024;
 
-		while (gen_count < max_gen)
+		/* Get initial next_token from logits (argmax) for first iteration */
 		{
-			/* Argmax sampling (deterministic) */
-			int		max_idx;
-			float	max_val;
-			int		j;
-
-			max_idx = 0;
-			max_val = logits[0];
-			j = 1;
+			int		max_idx = 0;
+			float	max_val = logits[0];
+			int		j = 1;
 			while (j < ctx->engine->config.vocab_size)
 			{
 				if (logits[j] > max_val)
@@ -350,35 +345,74 @@ void	*worker_routine(void *arg)
 				j++;
 			}
 			next_token = max_idx;
+		}
 
-			/* Check for EOS (token IDs vary by model) */
-			if (next_token == 2 || next_token == 0)
-				break ;
+		while (gen_count < max_gen)
+		{
+			int		burst_tokens[16];
+			int		n_burst;
+			int		b;
 
-			/* Decode token */
-			piece = tokenizer_decode(ctx->tokenizer, next_token);
-			if (piece)
+			/* MTP or Legacy mode? */
+			/* Disabled for production:
+			if (gen_count == 0)
+				printf("[DEBUG] worker.c: ctx->mtp = %p, is_spec = %d\n",
+					(void *)ctx->mtp, ctx->mtp ? ctx->mtp->is_speculative : -1);
+			*/
+			if (ctx->mtp && ctx->mtp->is_speculative)
 			{
-				int	piece_len;
-
-				piece_len = strlen(piece);
-				/* Stream the token */
-				if (job.stream)
-					send_sse_chunk(job.client_fd, piece);
-				/* Accumulate for non-streaming */
-				if (full_len + piece_len < 8000)
-				{
-					memcpy(full_response + full_len, piece, piece_len);
-					full_len += piece_len;
-					full_response[full_len] = '\0';
-				}
+				/* MTP BURST: Generate 1-5 tokens at once */
+				n_burst = mtp_generate(ctx->mtp, next_token,
+						n_tokens + gen_count - 1, burst_tokens);
+				if (n_burst > 1)
+					printf("\033[0;32m[BURST] ⚡ %d tokens\033[0m\n", n_burst);
+			}
+			else
+			{
+				/* LEGACY: Use current next_token, then forward */
+				burst_tokens[0] = next_token;
+				n_burst = 1;
+				logits = transformer_forward(ctx->engine, next_token,
+						n_tokens + gen_count);
 			}
 
-			/* Forward pass for next token */
-			logits = transformer_forward(ctx->engine, next_token,
-					n_tokens + gen_count);
-			gen_count++;
+			/* Process all tokens in burst */
+			b = 0;
+			while (b < n_burst && gen_count < max_gen)
+			{
+				next_token = burst_tokens[b];
+
+				/* Check for EOS */
+				if (next_token == 2 || next_token == 0)
+					goto end_generation;
+
+				/* Decode token */
+				piece = tokenizer_decode(ctx->tokenizer, next_token);
+				if (piece)
+				{
+					int	piece_len;
+
+					piece_len = strlen(piece);
+					/* Stream the token */
+					if (job.stream)
+						send_sse_chunk(job.client_fd, piece);
+					/* Accumulate for non-streaming */
+					if (full_len + piece_len < 8000)
+					{
+						memcpy(full_response + full_len, piece, piece_len);
+						full_len += piece_len;
+						full_response[full_len] = '\0';
+					}
+				}
+				gen_count++;
+				b++;
+			}
+
+			/* Check EOS */
+			if (next_token == 2 || next_token == 0)
+				break ;
 		}
+		end_generation:
 
 		/* 7. Finalize response */
 		if (job.stream)

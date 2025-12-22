@@ -39,6 +39,7 @@ fluid-*
 Ministral-Stuff/
 SmolLM3-Stuff/
 gemma-stuff/
+models/
 
 # Fluid Memory (persistent learning state)
 fluids/

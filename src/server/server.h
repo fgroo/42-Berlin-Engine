@@ -96,6 +96,7 @@ typedef struct s_server
 	int				max_conns;
 	t_transformer	*engine;         /* Inference engine */
 	t_tokenizer		*tokenizer;
+	struct s_mtp_engine	*mtp;        /* MTP engine (NULL = disabled) */
 	t_engine_context ctx;            /* Thread-safe session state */
 	volatile int	running;         /* Server loop control */
 	/* Phase 8: Async worker */

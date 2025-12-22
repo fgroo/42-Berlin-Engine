@@ -140,7 +140,7 @@ release: fclean
 # ============================================================================
 clean:
 	rm -f $(LIB_OBJS) $(MAIN_OBJ)
-	rm -f $(SRC_DIR)/chat.o $(SRC_DIR)/chat_adaptive.o
+	rm -f $(SRC_DIR)/modes/chat.o $(SRC_DIR)/modes/chat_adaptive.o
 	rm -f $(SRC_DIR)/bench_*.o
 	@echo "[CLEAN] Object files removed."
 
@@ -180,12 +180,12 @@ help:
 # ============================================================================
 # Legacy targets (for backwards compatibility)
 # ============================================================================
-chat: $(LIB_OBJS) $(SRC_DIR)/chat.o
-	$(CC) $(LIB_OBJS) $(SRC_DIR)/chat.o -o chat $(LDFLAGS)
+chat: $(LIB_OBJS) $(SRC_DIR)/modes/chat.o
+	$(CC) $(LIB_OBJS) $(SRC_DIR)/modes/chat.o -o chat $(LDFLAGS)
 	@echo "[CHAT] Built legacy chat binary"
 
-chat_adaptive: $(LIB_OBJS) $(SRC_DIR)/chat_adaptive.o
-	$(CC) $(LIB_OBJS) $(SRC_DIR)/chat_adaptive.o -o chat_adaptive $(LDFLAGS)
+chat_adaptive: $(LIB_OBJS) $(SRC_DIR)/modes/chat_adaptive.o
+	$(CC) $(LIB_OBJS) $(SRC_DIR)/modes/chat_adaptive.o -o chat_adaptive $(LDFLAGS)
 
 bench_perf: $(LIB_OBJS) tests/benchmarks/bench_perf.o
 	$(CC) $(LIB_OBJS) tests/benchmarks/bench_perf.o -o bench_perf $(LDFLAGS)

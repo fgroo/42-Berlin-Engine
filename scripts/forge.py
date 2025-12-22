@@ -23,24 +23,27 @@ from typing import List, Dict
 
 # No external SDK - raw HTTP to minimize dependencies
 ENGINE_URL = "http://localhost:9090/v1/distill"
-TEACHER_API_URL = "https://api.openai.com/v1/chat/completions"
-TEACHER_MODEL = "gpt-4o-mini"  # Cheap & fast for testing
+TEACHER_API_URL = "https://api.z.ai/api/paas/v4/chat/completions"
+TEACHER_MODEL = "glm-4.6"  # Zhipu AI teacher model
 
 
 def get_teacher_guidance(prompt: str, api_key: str) -> Dict:
     """
     Fetch teacher's "thoughts" (logprobs) for the next token.
+    Compatible with Zhipu AI GLM-4.6 API.
     """
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}"
     }
     
-    # Request top-20 logprobs
+    # Request format for Zhipu AI
     payload = {
         "model": TEACHER_MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 10,  # Just enough to see how it starts
+        "max_tokens": 10,
+        "temperature": 1.0,
+        # Note: Check if GLM-4.6 supports logprobs - if not, we need fallback
         "logprobs": True,
         "top_logprobs": 20
     }
@@ -52,6 +55,8 @@ def get_teacher_guidance(prompt: str, api_key: str) -> Dict:
         return resp.json()
     except requests.exceptions.RequestException as e:
         print(f"[!] Teacher Error: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            print(f"[!] Response: {e.response.text[:500]}")
         sys.exit(1)
 
 

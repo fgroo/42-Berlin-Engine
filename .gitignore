@@ -38,6 +38,7 @@ fluid-*
 *.safetensors
 Ministral-Stuff/
 SmolLM3-Stuff/
+gemma-stuff/
 
 # Fluid Memory (persistent learning state)
 fluids/

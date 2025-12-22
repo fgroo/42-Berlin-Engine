@@ -54,15 +54,18 @@ int		mtp_init(t_mtp_engine *eng, t_transformer *target, t_transformer *draft,
 			t_tokenizer *target_tok, t_tokenizer *draft_tok);
 
 /*
-** Generate next token using speculative decoding.
-** Returns the next token ID (target model's vocabulary).
+** Generate tokens using speculative decoding (BURST MODE).
+** Fills out_tokens buffer with all accepted/generated tokens.
+** Returns the number of tokens written to out_tokens (1 to n_draft+1).
 **
 ** @param eng          MTP engine context
-** @param prompt_token Last token (target ID)
+** @param prompt_token Last token (target ID) - the input to continue from
 ** @param pos          Current sequence position
-** @return             Next token ID
+** @param out_tokens   Buffer to receive generated tokens (must be >= MTP_MAX_DRAFT+1)
+** @return             Number of tokens written to out_tokens
 */
-int		mtp_generate(t_mtp_engine *eng, int prompt_token, int pos);
+int		mtp_generate(t_mtp_engine *eng, int prompt_token, int pos,
+			int *out_tokens);
 
 /*
 ** Print MTP statistics.

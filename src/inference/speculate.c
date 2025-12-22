@@ -86,34 +86,35 @@ void	kv_cache_rewind(t_transformer *t, int new_pos)
 
 /*
 ** ============================================================================
-** SPECULATIVE DECODING CORE
+** SPECULATIVE DECODING CORE (BURST MODE)
 ** ============================================================================
 ** The heart of MTP. Draft model proposes, Target model verifies.
+** Returns ALL accepted tokens in out_tokens buffer for streaming.
 */
 
-int	mtp_generate(t_mtp_engine *eng, int prompt_token, int pos)
+int	mtp_generate(t_mtp_engine *eng, int prompt_token, int pos, int *out_tokens)
 {
-	int			draft_tokens_gemma[MTP_MAX_DRAFT];  /* For debug/stats */
+	int			draft_tokens_gemma[MTP_MAX_DRAFT];
 	int			draft_tokens_target[MTP_MAX_DRAFT];
 	int			gemma_input;
 	int			curr_gemma;
-	int			n_accepted;
-	int			correct_token;
+	int			n_out;
 	int			check_input;
 	int			target_pred;
-	int			valid_until;
 	int			i;
+	int			j;
 	float		*logits;
+	float		max_val;
+	int			max_id;
 
 	/* ====================================================================== */
 	/* 0. FALLBACK: Standard mode if MTP disabled                             */
 	/* ====================================================================== */
-	if (!eng->draft || !eng->is_speculative)
+	if (!eng->draft || !eng->is_speculative || !out_tokens)
 	{
 		logits = transformer_forward(eng->target, prompt_token, pos);
-		/* Return argmax from logits */
-		int max_id = 0;
-		float max_val = logits[0];
+		max_id = 0;
+		max_val = logits[0];
 		for (i = 1; i < eng->target->config.vocab_size; i++)
 		{
 			if (logits[i] > max_val)
@@ -122,20 +123,21 @@ int	mtp_generate(t_mtp_engine *eng, int prompt_token, int pos)
 				max_id = i;
 			}
 		}
-		return (max_id);
+		if (out_tokens)
+			out_tokens[0] = max_id;
+		return (1);
 	}
 
 	/* ====================================================================== */
 	/* 1. SYNC PHASE                                                          */
 	/* ====================================================================== */
-	/* Translate prompt_token (Target ID) -> Draft ID */
 	gemma_input = bridge_reverse_translate(&eng->bridge, prompt_token);
 	if (gemma_input == BRIDGE_NO_MATCH)
 	{
 		/* Fallback: Can't translate, use standard path */
 		logits = transformer_forward(eng->target, prompt_token, pos);
-		int max_id = 0;
-		float max_val = logits[0];
+		max_id = 0;
+		max_val = logits[0];
 		for (i = 1; i < eng->target->config.vocab_size; i++)
 		{
 			if (logits[i] > max_val)
@@ -144,7 +146,8 @@ int	mtp_generate(t_mtp_engine *eng, int prompt_token, int pos)
 				max_id = i;
 			}
 		}
-		return (max_id);
+		out_tokens[0] = max_id;
+		return (1);
 	}
 
 	/* ====================================================================== */
@@ -154,44 +157,37 @@ int	mtp_generate(t_mtp_engine *eng, int prompt_token, int pos)
 	i = 0;
 	while (i < eng->n_draft && i < MTP_MAX_DRAFT)
 	{
-		/* A) Forward draft model */
 		logits = transformer_forward(eng->draft, curr_gemma, pos + i);
-		/* Greedy decode from draft */
-		int next_gemma = 0;
-		float max_val = logits[0];
-		for (int j = 1; j < eng->draft->config.vocab_size; j++)
+		max_id = 0;
+		max_val = logits[0];
+		for (j = 1; j < eng->draft->config.vocab_size; j++)
 		{
 			if (logits[j] > max_val)
 			{
 				max_val = logits[j];
-				next_gemma = j;
+				max_id = j;
 			}
 		}
-		draft_tokens_gemma[i] = next_gemma;
-		/* B) Translate to Target ID */
-		draft_tokens_target[i] = bridge_translate(&eng->bridge, next_gemma);
-		/* C) Next step uses this token */
-		curr_gemma = next_gemma;
+		draft_tokens_gemma[i] = max_id;
+		draft_tokens_target[i] = bridge_translate(&eng->bridge, max_id);
+		curr_gemma = max_id;
 		i++;
 	}
-	(void)draft_tokens_gemma;  /* Reserved for debug/stats output */
+	(void)draft_tokens_gemma;  /* Reserved for debug */
 	eng->total_drafted += eng->n_draft;
 
 	/* ====================================================================== */
-	/* 3. VERIFICATION PHASE                                                  */
+	/* 3. VERIFICATION PHASE (Burst Output)                                   */
 	/* ====================================================================== */
-	n_accepted = 0;
-	correct_token = -1;
+	n_out = 0;
 	check_input = prompt_token;
 	i = 0;
 	while (i < eng->n_draft)
 	{
-		/* Forward target model */
 		logits = transformer_forward(eng->target, check_input, pos + i);
-		/* Greedy decode from target */
 		target_pred = 0;
-		float max_val = logits[0];
-		for (int j = 1; j < eng->target->config.vocab_size; j++)
+		max_val = logits[0];
+		for (j = 1; j < eng->target->config.vocab_size; j++)
 		{
 			if (logits[j] > max_val)
 			{
@@ -199,43 +195,31 @@ int	mtp_generate(t_mtp_engine *eng, int prompt_token, int pos)
 				target_pred = j;
 			}
 		}
-		/* Compare with draft prediction */
 		if (target_pred == draft_tokens_target[i])
 		{
-			/* ACCEPT */
-			n_accepted++;
+			/* ACCEPT: Add to output buffer */
+			out_tokens[n_out++] = target_pred;
+			eng->total_accepted++;
 			check_input = target_pred;
 		}
 		else
 		{
-			/* REJECT */
-			correct_token = target_pred;
-			break ;
+			/* REJECT: Add correct token and stop */
+			out_tokens[n_out++] = target_pred;
+			eng->total_rejected++;
+			/* Rewind KV caches */
+			kv_cache_rewind(eng->target, pos + n_out);
+			kv_cache_rewind(eng->draft, pos + n_out);
+			return (n_out);
 		}
 		i++;
 	}
-	eng->total_accepted += n_accepted;
 
 	/* ====================================================================== */
-	/* 4. COMMIT OR ROLLBACK                                                  */
+	/* 4. FULL ACCEPT: All drafts correct                                     */
 	/* ====================================================================== */
-	if (n_accepted == eng->n_draft)
-	{
-		/* FULL ACCEPT: All drafts correct */
-		/* Return the last drafted token */
-		return (draft_tokens_target[eng->n_draft - 1]);
-	}
-	else
-	{
-		/* PARTIAL ACCEPT / REJECT */
-		eng->total_rejected++;
-		/* Rewind KV caches to valid position */
-		valid_until = pos + n_accepted + 1;
-		kv_cache_rewind(eng->target, valid_until);
-		kv_cache_rewind(eng->draft, valid_until);
-		/* Return the correct token from target */
-		return (correct_token);
-	}
+	/* n_out == n_draft, all tokens accepted */
+	return (n_out);
 }
 
 /*

@@ -77,7 +77,8 @@ NESTED_SRCS = $(SRC_DIR)/nested/fluid.c \
 ENGINE_SRCS = $(SRC_DIR)/tokenizer/tokenizer.c \
               $(SRC_DIR)/inference/inference.c \
               $(SRC_DIR)/inference/model.c \
-              $(SRC_DIR)/inference/bridge.c
+              $(SRC_DIR)/inference/bridge.c \
+              $(SRC_DIR)/inference/speculate.c
 
 MAIN_SRC = $(SRC_DIR)/main.c
 

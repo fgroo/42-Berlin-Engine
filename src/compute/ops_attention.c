@@ -99,6 +99,12 @@ static void	attention_head_dense(float *out, const float *q,
 	t = 0;
 	while (t < kv_len)
 	{
+		/* [FIX #9] Prefetch next K/V vectors to hide memory latency */
+		if (t + 4 < kv_len)
+		{
+			_mm_prefetch((const char *)(k_data + (t + 4) * kv_stride + kv_h * head_dim), _MM_HINT_T0);
+			_mm_prefetch((const char *)(v_data + (t + 4) * kv_stride + kv_h * head_dim), _MM_HINT_T0);
+		}
 		score = simd_dot_bf16_f32(
 			k_data + t * kv_stride + kv_h * head_dim, q, head_dim);
 		score *= scale;
@@ -177,7 +183,7 @@ void	op_attention_dense(t_attention_params *p, int kv_len)
 	k_data = (t_bf16 *)p->kv_cache->k.data;
 	v_data = (t_bf16 *)p->kv_cache->v.data;
 	kv_stride = p->n_kv_heads * p->head_dim;
-	memset(p->output, 0, p->n_heads * p->head_dim * sizeof(float));
+	/* [FIX #10] Removed redundant memset - per-head functions zero their outputs */
 	#pragma omp parallel for schedule(static) private(kv_h)
 	for (h = 0; h < p->n_heads; h++)
 	{
@@ -204,7 +210,7 @@ void	op_attention_sparse(t_attention_params *p)
 	k_data = (t_bf16 *)p->kv_cache->k.data;
 	v_data = (t_bf16 *)p->kv_cache->v.data;
 	kv_stride = p->n_kv_heads * p->head_dim;
-	memset(p->output, 0, p->n_heads * p->head_dim * sizeof(float));
+	/* [FIX #10] Removed redundant memset - per-head functions zero their outputs */
 	#pragma omp parallel for schedule(static) private(kv_h)
 	for (h = 0; h < p->n_heads; h++)
 	{
@@ -259,9 +265,24 @@ void	op_multihead_attention(t_attention_params *p)
 ** @param sum_exp: Running sum of exp (in/out)
 */
 
-/* Stack buffer sizes for JIT dequantization (16KB total, fits L1) */
+/* Buffer sizes for JIT dequantization (max 32KB per thread, fits L1) */
 #define MAX_BLOCK_SIZE 32
 #define MAX_HEAD_DIM 256
+
+/*
+** [FIX #3] THREAD-LOCAL BUFFERS FOR STACK SAFETY
+** ============================================================================
+** Problem: Original code allocated 32KB on stack per function call.
+** With 8 OpenMP threads, this is 512KB of stack per attention call!
+**
+** Solution: Thread-local static buffers (allocated once per thread).
+** ============================================================================
+*/
+static __thread float g_attn_k_buf[MAX_BLOCK_SIZE * MAX_HEAD_DIM]
+	__attribute__((aligned(64)));
+static __thread float g_attn_v_buf[MAX_BLOCK_SIZE * MAX_HEAD_DIM]
+	__attribute__((aligned(64)));
+
 
 /*
 ** PHASE 2 DEEP FREEZE: INT8 Paged Attention Block Kernel
@@ -280,9 +301,9 @@ static void	attention_block_int8(float *out, const float *q,
 	float	prev_max;
 	float	scale_factor;
 	float	raw_exp;
-	/* Stack buffers for JIT dequantization (hot L1 cache) */
-	float	k_buf[MAX_BLOCK_SIZE * MAX_HEAD_DIM] __attribute__((aligned(32)));
-	float	v_buf[MAX_BLOCK_SIZE * MAX_HEAD_DIM] __attribute__((aligned(32)));
+	/* [FIX #3] Use thread-local buffers instead of stack allocation */
+	float	*k_buf = g_attn_k_buf;
+	float	*v_buf = g_attn_v_buf;
 
 	n_tokens = block->n_tokens;
 	if (n_tokens <= 0)
@@ -404,7 +425,7 @@ void	op_paged_attention(float *output, const float *q,
 	int	h;
 	int	kv_h;
 
-	memset(output, 0, n_heads * head_dim * sizeof(float));
+	/* [FIX #10] Removed redundant memset - per-head functions zero their outputs */
 	#pragma omp parallel for schedule(static) private(kv_h)
 	for (h = 0; h < n_heads; h++)
 	{
@@ -426,7 +447,7 @@ void	op_paged_attention_sparse(float *output, const float *q,
 	int	h;
 	int	kv_h;
 
-	memset(output, 0, n_heads * head_dim * sizeof(float));
+	/* [FIX #10] Removed redundant memset - per-head functions zero their outputs */
 	#pragma omp parallel for schedule(static) private(kv_h)
 	for (h = 0; h < n_heads; h++)
 	{

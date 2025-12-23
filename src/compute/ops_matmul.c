@@ -373,8 +373,10 @@ int	op_matmul(t_tensor *out, const t_tensor *a, const t_tensor *b)
 
 	if (a->shape[1] != b->shape[0])
 	{
-		fprintf(stderr, "MatMul dim mismatch: [%d,%d] x [%d,%d]\n",
-			a->shape[0], a->shape[1], b->shape[0], b->shape[1]);
+		/* [DEBUG] Print stack context for dimension mismatch */
+		fprintf(stderr, "MatMul dim mismatch: [%d,%d] x [%d,%d] (A.k=%d != B.m=%d)\n",
+			a->shape[0], a->shape[1], b->shape[0], b->shape[1],
+			a->shape[1], b->shape[0]);
 		return (-1);
 	}
 

@@ -6,7 +6,7 @@
 /*   By: fgroo <fgroo@student.42berlin.de>    +#+  +:+       +#+        */
 /*                                                +#+#+#+#+#+   +#+           */
 /*   Created: 2025/12/14 15:00:00 by fgroo       #+#    #+#             */
-/*   Updated: 2025/12/14 15:00:00 by fgroo      ###   ########.fr       */
+/*   Updated: 2025/12/23 14:00:00 by fgroo      ###   ########.fr       */
 /*                                                                            */
 /* ************************************************************************** */
 
@@ -18,9 +18,28 @@
 # include <string.h>
 
 /*
-** SAFE_ALLOC: Memory allocation with mandatory NULL check.
-** Prints error and exits cleanly on failure.
-** Usage: ptr = xmalloc(size);
+** ============================================================================
+** [FIX #4] MEMORY SAFETY - NULL CHECKS HANDLED AT ALLOCATION
+** ============================================================================
+** PROBLEM: Scattered malloc() calls throughout codebase without NULL checks
+** leads to undefined behavior on allocation failure.
+**
+** SOLUTION: Use xmalloc/xcalloc/xrealloc instead of raw malloc/calloc/realloc.
+** These functions:
+**   1. Check for NULL return from the underlying allocator
+**   2. Print a diagnostic message to stderr
+**   3. exit(1) to terminate cleanly
+**
+** DESIGN RATIONALE: "Fail-fast" approach
+**   - LLM inference requires consistent memory (no half-initialized state)
+**   - Recovery from OOM mid-inference is impractical (model is corrupted)
+**   - Clean termination is preferable to silent data corruption
+**   - All callers can assume non-NULL return (no defensive checks needed)
+**
+** USAGE: Replace malloc/calloc/realloc with xmalloc/xcalloc/xrealloc everywhere.
+** If you need graceful OOM handling (e.g., sparse attention fallback),
+** use arena_try_alloc() from arena.c instead.
+** ============================================================================
 */
 
 static inline void	*xmalloc(size_t size)

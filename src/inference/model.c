@@ -121,7 +121,15 @@ static int	load_config(t_transformer_config *conf, const char *path)
 	if (conf->n_heads == 0) conf->n_heads = 32;
 	if (conf->n_kv_heads == 0) conf->n_kv_heads = 8;
 	if (conf->vocab_size == 0) conf->vocab_size = 131072;
-	if (conf->head_dim == 0) conf->head_dim = 128;
+	
+	/* [FIX] head_dim: Calculate from dim/n_heads if not explicitly set
+	** SmolLM uses head_dim=64 (576/9), not 128. Many models don't set this. */
+	if (conf->head_dim == 0) {
+		if (conf->dim > 0 && conf->n_heads > 0)
+			conf->head_dim = conf->dim / conf->n_heads;
+		else
+			conf->head_dim = 128;  /* Last resort default */
+	}
 	
 	// Defaults for YaRN if not found
 	if (conf->rope_theta == 0.0f) conf->rope_theta = 1000000.0f;

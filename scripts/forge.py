@@ -24,13 +24,16 @@ from typing import List, Dict
 # No external SDK - raw HTTP to minimize dependencies
 ENGINE_URL = "http://localhost:9090/v1/distill"
 TEACHER_API_URL = "https://api.z.ai/api/paas/v4/chat/completions"
-TEACHER_MODEL = "glm-4.6"  # Zhipu AI teacher model
+TEACHER_MODEL = "glm-4.7"  # Zhipu AI teacher model (upgraded from 4.6)
 
 
 def get_teacher_guidance(prompt: str, api_key: str) -> Dict:
     """
     Fetch teacher's "thoughts" (logprobs) for the next token.
-    Compatible with Zhipu AI GLM-4.6 API.
+    Compatible with Zhipu AI GLM-4.7 API.
+    
+    NOTE: GLM-4.7 may not support logprobs. If response lacks logprobs,
+    consider using forge_glm.py for hard-label distillation instead.
     """
     headers = {
         "Content-Type": "application/json",

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-THE FORGE: GLM-4.6 HARD-LABEL EDITION
+THE FORGE: GLM-4.7 HARD-LABEL EDITION
 -------------------------------------
 Strategy: Imitation Learning / Teacher Forcing
 No logprobs available. We use generated text as ground truth (prob=1.0).
@@ -24,14 +24,14 @@ ENGINE_URL = "http://localhost:9090/v1/distill"
 
 
 def get_teacher_completion(prompt: str) -> str:
-    """Get generated text from GLM-4.6 (no logprobs)."""
+    """Get generated text from GLM-4.7 (no logprobs)."""
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {API_KEY}"
     }
     
     payload = {
-        "model": "glm-4.6",
+        "model": "glm-4.7",
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
         "temperature": 0.1,  # Deterministic for imitation
@@ -40,7 +40,7 @@ def get_teacher_completion(prompt: str) -> str:
     }
 
     try:
-        print(f"[*] Consulting GLM-4.6 Teacher...")
+        print(f"[*] Consulting GLM-4.7 Teacher...")
         resp = requests.post(GLM_URL, headers=headers, json=payload, timeout=60)
         resp.raise_for_status()
         data = resp.json()
@@ -184,7 +184,7 @@ def distill_hard_labels(prompt: str, teacher_text: str):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="The Forge: GLM-4.6 Hard-Label Distillation"
+        description="The Forge: GLM-4.7 Hard-Label Distillation"
     )
     parser.add_argument(
         "--prompt", 

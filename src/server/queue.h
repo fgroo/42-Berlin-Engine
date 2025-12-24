@@ -45,6 +45,12 @@ typedef struct s_job
 	/* Phase 9: DeepSeek R1 thinking support */
 	int		enable_thinking;  /* 1 = stream reasoning_content first */
 	int		thinking_budget;  /* Max tokens for thinking phase */
+	/* Phase 10: Runtime Learning (TTT/MOPD) */
+	int		learn;            /* 1 = enable nested learning during generation */
+	int		mopd;             /* 1 = MOPD mode (learn from teacher), 0 = self-correction */
+	/* MOPD: Teacher tokens for distillation */
+	int		*teacher_tokens;  /* Tokenized teacher response (worker frees) */
+	int		n_teacher_tokens; /* Number of teacher tokens */
 }	t_job;
 
 /*

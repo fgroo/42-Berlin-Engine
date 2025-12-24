@@ -211,11 +211,13 @@ fluid-get: $(SRC_DIR)/fluid/fluid_get.c
 # ============================================================================
 # HTTP Daemon (42d - OpenAI-compatible API server)
 # Phase 9: Total OpenAI Compatibility (flexible routing, thinking support)
+# Phase 10: MOPD - Teacher integration for knowledge distillation
 # ============================================================================
 SERVER_SRCS = $(SRC_DIR)/server/server.c \
               $(SRC_DIR)/server/queue.c \
               $(SRC_DIR)/server/worker.c \
-              $(SRC_DIR)/server/json_parse.c
+              $(SRC_DIR)/server/json_parse.c \
+              $(SRC_DIR)/server/teacher.c
 SERVER_OBJS = $(SERVER_SRCS:.c=.o)
 DAEMON_SRC = $(SRC_DIR)/server/42d.c
 DAEMON_OBJ = $(DAEMON_SRC:.c=.o)

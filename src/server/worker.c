@@ -11,7 +11,11 @@
 /* ************************************************************************** */
 
 #include "worker.h"
+#include "teacher.h"                /* MOPD: teacher_fetch_completion */
 #include "memory/paged.h"
+#include "inference/inference.h"  /* transformer_backward_step et al */
+#include "compute/sampler.h"      /* sample_top_p, sample_argmax */
+#include "config.h"               /* NESTED_LR, REPETITION_PENALTY */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -209,8 +213,12 @@ void	*worker_routine(void *arg)
 	char			full_response[8192];
 	int				full_len;
 	int				max_gen;
+	t_arena			sampler_scratch;  /* For Top-P sampling */
+	int				generated_tokens[1024];  /* For repetition penalty */
+	int				n_generated;
 
 	ctx = (t_worker_ctx *)arg;
+	arena_init(&sampler_scratch, 4 * 1024 * 1024);  /* 4MB for sampler */
 	printf("[WORKER] Inference worker started\n");
 
 	while (ctx->running)
@@ -240,6 +248,47 @@ void	*worker_routine(void *arg)
 				"Analyzing the request and planning response...");
 			send_sse_reasoning(job.client_fd,
 				"Considering optimal implementation approach...");
+		}
+
+		/* Phase 10: MOPD - Fetch teacher completion BEFORE prefill */
+		if (job.mopd && job.learn)
+		{
+			const char *api_key = getenv("OPENAI_API_KEY");
+			if (api_key)
+			{
+				printf("[MOPD] \033[0;36m🎓 Consulting Teacher GLM-4.7...\033[0m\n");
+				fflush(stdout);
+				char *teacher_text = teacher_fetch_completion(job.prompt, api_key, 50);
+				if (teacher_text)
+				{
+					printf("[MOPD] Teacher says: '%.100s%s'\n", teacher_text,
+						strlen(teacher_text) > 100 ? "..." : "");
+					/* Tokenize teacher response */
+					job.teacher_tokens = NULL;
+					job.n_teacher_tokens = tokenizer_encode(ctx->tokenizer,
+						teacher_text, &job.teacher_tokens);
+					if (job.n_teacher_tokens > 0 && job.teacher_tokens)
+					{
+						printf("[MOPD] \033[0;32m✓ Teacher provided %d tokens\033[0m\n",
+							job.n_teacher_tokens);
+					}
+					else
+					{
+						printf("[MOPD] Failed to tokenize teacher response\n");
+						job.teacher_tokens = NULL;
+						job.n_teacher_tokens = 0;
+					}
+					free(teacher_text);
+				}
+				else
+				{
+					printf("[MOPD] Teacher silent. Fallback to Self-Correction.\n");
+				}
+			}
+			else
+			{
+				printf("[MOPD] No API key. Set OPENAI_API_KEY. Using Self-Correction.\n");
+			}
 		}
 
 		/* Phase 10: Chat Template using Token IDs (like chat.c)
@@ -308,6 +357,18 @@ void	*worker_routine(void *arg)
 				paged_kv_reset(&ctx->engine->paged_kv[l]);
 		}
 		
+		/* Phase 10: Enable runtime learning if requested */
+		if (job.learn)
+		{
+			ctx->engine->nested_learning = 1;
+			backward_zero_grads(ctx->engine);
+			printf("[WORKER] \033[0;33m⚡ Runtime Learning ENABLED\033[0m\n");
+		}
+		else
+		{
+			ctx->engine->nested_learning = 0;
+		}
+
 		/* 4. SEQUENTIAL PREFILL (like chat.c)
 		** The batch kernel (forward_prefill_batch) has a bug causing garbage.
 		** Sequential forward is identical to the working chat.c code path. */
@@ -322,29 +383,39 @@ void	*worker_routine(void *arg)
 		logits = transformer_forward(ctx->engine, tokens[n_tokens - 1],
 				n_tokens - 1);
 
-		/* 6. Generation loop with streaming (MTP Burst Mode) */
+		/* 6. Generation loop with streaming */
 		full_len = 0;
 		full_response[0] = '\0';
 		gen_count = 0;
+		n_generated = 0;
 		max_gen = (job.max_tokens > 0) ? job.max_tokens : 256;
 		if (max_gen > 1024)
 			max_gen = 1024;
 
-		/* Get initial next_token from logits (argmax) for first iteration */
+		/* Sampling parameters */
+		float temp = (job.temperature > 0.0f) ? job.temperature : 0.7f;
+		float top_p = 0.9f;  /* Standard nucleus sampling */
+
+		/* Sample first token from initial logits */
 		{
-			int		max_idx = 0;
-			float	max_val = logits[0];
-			int		j = 1;
-			while (j < ctx->engine->config.vocab_size)
+			t_tensor logits_tensor;
+			logits_tensor.data = logits;
+			logits_tensor.size = ctx->engine->config.vocab_size;
+			logits_tensor.dtype = DTYPE_F32;
+
+			/* Apply repetition penalty to prompt tokens */
+			for (int j = 0; j < n_tokens; j++)
 			{
-				if (logits[j] > max_val)
-				{
-					max_val = logits[j];
-					max_idx = j;
-				}
-				j++;
+				if (logits[tokens[j]] > 0)
+					logits[tokens[j]] /= REPETITION_PENALTY;
+				else
+					logits[tokens[j]] *= REPETITION_PENALTY;
 			}
-			next_token = max_idx;
+			/* Block UNK token */
+			logits[0] = -1e9f;
+
+			arena_reset(&sampler_scratch);
+			next_token = sample_top_p(&logits_tensor, temp, top_p, &sampler_scratch);
 		}
 
 		while (gen_count < max_gen)
@@ -354,11 +425,6 @@ void	*worker_routine(void *arg)
 			int		b;
 
 			/* MTP or Legacy mode? */
-			/* Disabled for production:
-			if (gen_count == 0)
-				printf("[DEBUG] worker.c: ctx->mtp = %p, is_spec = %d\n",
-					(void *)ctx->mtp, ctx->mtp ? ctx->mtp->is_speculative : -1);
-			*/
 			if (ctx->mtp && ctx->mtp->is_speculative)
 			{
 				/* MTP BURST: Generate 1-5 tokens at once */
@@ -369,11 +435,40 @@ void	*worker_routine(void *arg)
 			}
 			else
 			{
-				/* LEGACY: Use current next_token, then forward */
-				burst_tokens[0] = next_token;
-				n_burst = 1;
+				/* LEGACY: Forward pass, then sample from new logits */
 				logits = transformer_forward(ctx->engine, next_token,
 						n_tokens + gen_count);
+
+				/* Build logits tensor for sampler */
+				t_tensor logits_tensor;
+				logits_tensor.data = logits;
+				logits_tensor.size = ctx->engine->config.vocab_size;
+				logits_tensor.dtype = DTYPE_F32;
+
+				/* Apply repetition penalty to prompt + generated tokens */
+				for (int j = 0; j < n_tokens; j++)
+				{
+					if (logits[tokens[j]] > 0)
+						logits[tokens[j]] /= REPETITION_PENALTY;
+					else
+						logits[tokens[j]] *= REPETITION_PENALTY;
+				}
+				for (int j = 0; j < n_generated; j++)
+				{
+					if (logits[generated_tokens[j]] > 0)
+						logits[generated_tokens[j]] /= REPETITION_PENALTY;
+					else
+						logits[generated_tokens[j]] *= REPETITION_PENALTY;
+				}
+				/* Block UNK token */
+				logits[0] = -1e9f;
+
+				/* Sample next token with Top-P */
+				arena_reset(&sampler_scratch);
+				next_token = sample_top_p(&logits_tensor, temp, top_p, &sampler_scratch);
+				
+				burst_tokens[0] = next_token;
+				n_burst = 1;
 			}
 
 			/* Process all tokens in burst */
@@ -381,6 +476,10 @@ void	*worker_routine(void *arg)
 			while (b < n_burst && gen_count < max_gen)
 			{
 				next_token = burst_tokens[b];
+
+				/* Track generated tokens for repetition penalty */
+				if (n_generated < 1024)
+					generated_tokens[n_generated++] = next_token;
 
 				/* Check for EOS */
 				if (next_token == 2 || next_token == 0)
@@ -404,6 +503,31 @@ void	*worker_routine(void *arg)
 						full_response[full_len] = '\0';
 					}
 				}
+
+				/* Phase 10: RUNTIME LEARNING */
+				if (job.learn && ctx->engine->nested_learning)
+				{
+					int target_token;
+					
+					/* MOPD: Use teacher token as ground truth if available */
+					if (job.mopd && job.teacher_tokens && gen_count < job.n_teacher_tokens)
+					{
+						target_token = job.teacher_tokens[gen_count];
+						/* Optional: Teacher Forcing - use teacher token for next step */
+						/* This makes the model follow the teacher's path exactly */
+						/* Uncomment for stricter distillation: */
+						/* next_token = target_token; */
+					}
+					else
+					{
+						/* Self-Correction: Use our own sample as ground truth */
+						target_token = next_token;
+					}
+					
+					transformer_backward_step(ctx->engine, target_token,
+						n_tokens + gen_count);
+				}
+
 				gen_count++;
 				b++;
 			}
@@ -414,6 +538,14 @@ void	*worker_routine(void *arg)
 		}
 		end_generation:
 
+		/* Phase 10: Apply accumulated gradients if learning was enabled */
+		if (job.learn && ctx->engine->nested_learning)
+		{
+			backward_apply_grads(ctx->engine, ctx->engine->nested_lr);
+			printf("[WORKER] \033[0;32m✓ Fluid weights updated (lr=%.5f)\033[0m\n",
+				ctx->engine->nested_lr);
+		}
+
 		/* 7. Finalize response */
 		if (job.stream)
 			send_sse_done(job.client_fd);
@@ -421,8 +553,10 @@ void	*worker_routine(void *arg)
 			send_json_completion(job.client_fd, full_response, n_tokens,
 				gen_count);
 
-		printf("[WORKER] Generated %d tokens for socket %d\n",
-			gen_count, job.client_fd);
+		printf("[WORKER] Generated %d tokens for socket %d%s%s\n",
+			gen_count, job.client_fd, 
+			job.learn ? " [LEARNED]" : "",
+			job.mopd ? " [MOPD]" : "");
 
 		/* 8. Cleanup */
 		close(job.client_fd);
@@ -430,6 +564,8 @@ void	*worker_routine(void *arg)
 			free(job.prompt);
 		if (tokens)
 			free(tokens);
+		if (job.teacher_tokens)
+			free(job.teacher_tokens);
 	}
 
 	printf("[WORKER] Inference worker stopped\n");

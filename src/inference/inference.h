@@ -121,6 +121,7 @@ typedef struct s_transformer
 	t_arena					kv_arena;
 	t_arena					scratch;
 	t_arena					fluid_arena;   // Arena for FLUID tensor copies (RW)
+	t_arena					state_arena;   // Arena for inference state buffers
 	int						sparse_k;
 	int						nested_learning;
 	float					nested_lr;

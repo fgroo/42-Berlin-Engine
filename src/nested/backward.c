@@ -170,46 +170,79 @@ void	backward_apply_grads(t_transformer *t, float lr)
 
 /*
 ** Backprop through output layer: grad_x = output_weight^T @ grad_logits
-** Uses pre-transposed weights for cache-friendly access
+** ZERO-COPY VERSION: Reads directly from frozen weights (mmap) without
+** materializing the 800MB transposed matrix.
+**
+** Key insight: W is [Vocab, Dim] row-major. Instead of transposing to [Dim, Vocab],
+** we iterate over Vocab (outer) and accumulate into grad_x (inner).
+** This is cache-friendly for W reads (sequential rows) and grad_x fits in L1/L2.
+**
+** Sparsity optimization: After softmax, most logit gradients are near-zero.
+** We skip rows where |grad| < epsilon, avoiding 4K+ FMA ops per skipped token.
 */
 static void	backprop_output_layer(t_transformer *t, float *grad_x)
 {
 	t_transformer_config	*c;
 	t_inference_state		*s;
-	int						d;
-	int						v;
+	int						dim;
 	int						vocab;
-	float					sum;
+	t_bf16					*w_data;
+	float					*logits;
 
 	c = &t->config;
 	s = &t->state;
+	dim = c->dim;
 	vocab = c->vocab_size;
-	memset(grad_x, 0, c->dim * sizeof(float));
-	if (t->output_weight_T)
+	w_data = (t_bf16 *)t->weights.output->data;
+	logits = s->logits;
+
+	/* Zero the output gradient accumulator */
+	memset(grad_x, 0, dim * sizeof(float));
+
+	/* Accumulate: grad_x[d] += sum_v(logits[v] * W[v,d]) */
+	/* This is mathematically equivalent to: grad_x = W^T @ logits */
+	for (int v = 0; v < vocab; v++)
 	{
-		/* FAST PATH: Pre-transposed BF16 weights with SIMD */
-		#pragma omp parallel for schedule(static)
-		for (d = 0; d < c->dim; d++)
-			grad_x[d] = simd_dot_bf16_f32(
-				t->output_weight_T + d * vocab, s->logits, vocab);
-	}
-	else
-	{
-		/* FALLBACK: Naive column-major access */
-		t_bf16 *ow_data = (t_bf16 *)t->weights.output->data;
-		d = 0;
-		while (d < c->dim)
+		float grad_val = logits[v];
+		
+		/* SPARSITY SKIP: After softmax-1, most gradients are tiny */
+		/* Skip if |grad| < 1e-6 (saves ~4K ops per skipped token) */
+		if (grad_val > -1e-6f && grad_val < 1e-6f)
+			continue;
+
+		/* Row pointer: W[v] = w_data[v * dim] */
+		t_bf16 *w_row = &w_data[v * dim];
+
+#ifdef __AVX2__
+		/* AVX2 SIMD path: 8 floats per iteration with FMA */
+		__m256 g_vec = _mm256_set1_ps(grad_val);
+		int d = 0;
+		
+		/* Main loop: 8 floats at a time */
+		for (; d <= dim - 8; d += 8)
 		{
-			sum = 0.0f;
-			v = 0;
-			while (v < vocab)
-			{
-				sum += bf16_to_float(ow_data[v * c->dim + d]) * s->logits[v];
-				v++;
-			}
-			grad_x[d] = sum;
-			d++;
+			/* Load accumulator */
+			__m256 acc = _mm256_loadu_ps(&grad_x[d]);
+			
+			/* Load W row (BF16 -> FP32) */
+			__m128i w_raw = _mm_loadu_si128((const __m128i *)&w_row[d]);
+			__m256 w_vec = mm256_cvtbf16_ps(w_raw);
+			
+			/* FMA: acc += grad_val * w */
+			acc = _mm256_fmadd_ps(g_vec, w_vec, acc);
+			
+			/* Store back */
+			_mm256_storeu_ps(&grad_x[d], acc);
 		}
+		
+		/* Scalar cleanup */
+		for (; d < dim; d++)
+			grad_x[d] += grad_val * bf16_to_float(w_row[d]);
+#else
+		/* Scalar fallback */
+		for (int d = 0; d < dim; d++)
+			grad_x[d] += grad_val * bf16_to_float(w_row[d]);
+#endif
 	}
 }
 

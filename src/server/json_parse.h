@@ -37,6 +37,8 @@ typedef struct s_chat_request
 	float	top_p;            /* top_p (default: 0.9) */
 	int		enable_thinking;  /* thinking.type == "enabled" */
 	int		thinking_budget;  /* thinking.budget_tokens */
+	int		learn;            /* learn: true = enable runtime learning */
+	int		mopd;             /* mopd: true = use teacher for distillation */
 }	t_chat_request;
 
 /*

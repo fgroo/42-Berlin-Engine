@@ -551,7 +551,8 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 		if (t->fluid_layers)
 		{
 			// Cache hb for backward pass ONLY during learning
-			if (t->nested_learning)
+			// SAFETY: Check hb_cache != NULL (frozen layers have NULL pointers!)
+			if (t->nested_learning && t->fluid_layers[i].hb_cache)
 				memcpy(t->fluid_layers[i].hb_cache, s->hb, c->hidden_dim * sizeof(float));
 			
 			// SIMD+OpenMP optimized adapter matmul: xb += SCALE * adapter @ hb

@@ -142,16 +142,6 @@ static int	load_config(t_transformer_config *conf, const char *path)
 	return (0);
 }
 
-static void *aligned_calloc(size_t num, size_t size)
-{
-	void *ptr = NULL;
-	size_t total = num * size;
-	/* 64-byte alignment: AVX-512 ready and cache-line aligned */
-	if (posix_memalign(&ptr, 64, total) != 0) return NULL;
-	memset(ptr, 0, total);
-	return ptr;
-}
-
 
 int	transformer_init(t_transformer *t, const char *model_path, const char *config_path)
 {
@@ -284,33 +274,41 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 	if (!t->weights.output)
 		t->weights.output = t->weights.token_embedding;
 
-	// Init state
-	t->state.x = aligned_calloc(t->config.dim, sizeof(float));
-	t->state.xb = aligned_calloc(t->config.dim, sizeof(float));
-	t->state.hb = aligned_calloc(t->config.hidden_dim, sizeof(float));
-	t->state.hb2 = aligned_calloc(t->config.hidden_dim, sizeof(float));
-	t->state.q = aligned_calloc(t->config.n_heads * t->config.head_dim, sizeof(float));
-	t->state.k = aligned_calloc(t->config.n_kv_heads * t->config.head_dim, sizeof(float));
-	t->state.v = aligned_calloc(t->config.n_kv_heads * t->config.head_dim, sizeof(float));
-	t->state.att = aligned_calloc(t->config.n_heads * t->config.seq_len, sizeof(float));
-	t->state.logits = aligned_calloc(t->config.vocab_size, sizeof(float));
-	t->state.grad_x = aligned_calloc(t->config.dim, sizeof(float)); // For backprop
-	t->state.final_input_cache = aligned_calloc(t->config.dim, sizeof(float)); // [HOTFIX] Issue #1
+	// ========== STATE ARENA (Arena Consolidation) ==========
+	// 10MB state arena for all inference buffers - contiguous, cache-friendly
+	arena_init(&t->state_arena, 10 * 1024 * 1024);
+	if (!t->state_arena.base) {
+		fprintf(stderr, "FATAL: state_arena init failed\n");
+		return -1;
+	}
+
+	// Init state (now using state_arena for contiguous memory)
+	t->state.x = arena_alloc_or_die(&t->state_arena, t->config.dim * sizeof(float));
+	t->state.xb = arena_alloc_or_die(&t->state_arena, t->config.dim * sizeof(float));
+	t->state.hb = arena_alloc_or_die(&t->state_arena, t->config.hidden_dim * sizeof(float));
+	t->state.hb2 = arena_alloc_or_die(&t->state_arena, t->config.hidden_dim * sizeof(float));
+	t->state.q = arena_alloc_or_die(&t->state_arena, t->config.n_heads * t->config.head_dim * sizeof(float));
+	t->state.k = arena_alloc_or_die(&t->state_arena, t->config.n_kv_heads * t->config.head_dim * sizeof(float));
+	t->state.v = arena_alloc_or_die(&t->state_arena, t->config.n_kv_heads * t->config.head_dim * sizeof(float));
+	t->state.att = arena_alloc_or_die(&t->state_arena, t->config.n_heads * t->config.seq_len * sizeof(float));
+	t->state.logits = arena_alloc_or_die(&t->state_arena, t->config.vocab_size * sizeof(float));
+	t->state.grad_x = arena_alloc_or_die(&t->state_arena, t->config.dim * sizeof(float)); // For backprop
+	t->state.final_input_cache = arena_alloc_or_die(&t->state_arena, t->config.dim * sizeof(float)); // [HOTFIX] Issue #1
 	
-	// ========== BATCHED PREFILL BUFFERS (Phase 2) ==========
+	// ========== BATCHED PREFILL BUFFERS (Phase 2) - Now in state_arena ==========
 	// Enable GEMM (M=batch_size) instead of GEMV (M=1) for QKV projections
 	// Total: ~5-6MB extra memory for 20%+ prefill speedup
-	t->state.batch_x = aligned_calloc(MAX_PREFILL_BATCH * t->config.dim, sizeof(float));
-	t->state.batch_xb = aligned_calloc(MAX_PREFILL_BATCH * t->config.dim, sizeof(float));
-	t->state.batch_q = aligned_calloc(MAX_PREFILL_BATCH * t->config.n_heads * t->config.head_dim, sizeof(float));
-	t->state.batch_k = aligned_calloc(MAX_PREFILL_BATCH * t->config.n_kv_heads * t->config.head_dim, sizeof(float));
-	t->state.batch_v = aligned_calloc(MAX_PREFILL_BATCH * t->config.n_kv_heads * t->config.head_dim, sizeof(float));
-	t->state.batch_out = aligned_calloc(MAX_PREFILL_BATCH * t->config.dim, sizeof(float));
-	t->state.batch_hb = aligned_calloc(MAX_PREFILL_BATCH * t->config.hidden_dim, sizeof(float));
-	t->state.batch_hb2 = aligned_calloc(MAX_PREFILL_BATCH * t->config.hidden_dim, sizeof(float));
+	t->state.batch_x = arena_alloc_or_die(&t->state_arena, MAX_PREFILL_BATCH * t->config.dim * sizeof(float));
+	t->state.batch_xb = arena_alloc_or_die(&t->state_arena, MAX_PREFILL_BATCH * t->config.dim * sizeof(float));
+	t->state.batch_q = arena_alloc_or_die(&t->state_arena, MAX_PREFILL_BATCH * t->config.n_heads * t->config.head_dim * sizeof(float));
+	t->state.batch_k = arena_alloc_or_die(&t->state_arena, MAX_PREFILL_BATCH * t->config.n_kv_heads * t->config.head_dim * sizeof(float));
+	t->state.batch_v = arena_alloc_or_die(&t->state_arena, MAX_PREFILL_BATCH * t->config.n_kv_heads * t->config.head_dim * sizeof(float));
+	t->state.batch_out = arena_alloc_or_die(&t->state_arena, MAX_PREFILL_BATCH * t->config.dim * sizeof(float));
+	t->state.batch_hb = arena_alloc_or_die(&t->state_arena, MAX_PREFILL_BATCH * t->config.hidden_dim * sizeof(float));
+	t->state.batch_hb2 = arena_alloc_or_die(&t->state_arena, MAX_PREFILL_BATCH * t->config.hidden_dim * sizeof(float));
 	
-	// ========== NESTED LEARNING CONTEXT (TechLead Solution) ==========
-	t->state.token_history = calloc(t->config.seq_len, sizeof(int));
+	// ========== NESTED LEARNING CONTEXT (TechLead Solution) - Now in state_arena ==========
+	t->state.token_history = arena_alloc_or_die(&t->state_arena, t->config.seq_len * sizeof(int));
 	
 	// Init KV Cache
 	// Allocate 1GB for KV cache
@@ -323,8 +321,27 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 	// Scratch arena for Top-K selection (1MB is plenty)
 	arena_init(&t->scratch, 1024 * 1024);
 	
-	// Fluid arena for TENSOR_FLUID copies (writable adapters) - 64MB
-	arena_init(&t->fluid_arena, 64 * 1024 * 1024);
+	// Fluid arena for TENSOR_FLUID copies (writable adapters)
+	// Size calculated based on trainable layers:
+	// - Per trainable layer: ~200MB for dim=3072, hidden_dim=8192
+	// - Plus final_adapter (dim*dim BF16), final_adapter_grad (dim*dim FP32)
+	// - Plus logit_bias, context_bias, LSH structures
+	// Formula: (n_layers - FROZEN_LAYERS) * per_layer + overhead
+	int n_trainable = t->config.n_layers > FROZEN_LAYERS ? 
+	                  t->config.n_layers - FROZEN_LAYERS : 1;
+	size_t per_layer = (size_t)t->config.dim * t->config.hidden_dim * 
+	                   (2 * sizeof(t_bf16) + sizeof(float)) +  // w2_weight, w2_grad, grad_acc
+	                   t->config.hidden_dim * sizeof(float);    // hb_cache
+	size_t final_adapter_bytes = (size_t)t->config.dim * t->config.dim * 
+	                             (sizeof(t_bf16) + sizeof(float));  // BF16 weight + FP32 grad
+	size_t adapter_overhead = final_adapter_bytes +
+	                          t->config.vocab_size * sizeof(float) +                     // logit_bias
+	                          CONTEXT_BIAS_SIZE * (sizeof(uint64_t) + sizeof(int) + sizeof(float)); // context_bias
+	size_t fluid_arena_size = (n_trainable * per_layer) + adapter_overhead + (64 * 1024 * 1024); // +64MB safety margin
+	
+	arena_init(&t->fluid_arena, fluid_arena_size);
+	printf("[FLUID_ARENA] Sized for %d trainable layers: %.2f MB\n", 
+		n_trainable, fluid_arena_size / (1024.0 * 1024.0));
 	
 	// SPARSE ATTENTION: Top-K keys per head (0 = dense attention)
 	t->sparse_k = SPARSE_K;  // From config.h
@@ -349,14 +366,40 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 	for (int h = 0; h < t->config.n_kv_heads; h++)
 		ew[h] = float_to_bf16(1.0f);
 	
-	// Allocate fluid layers (adapters for test-time learning)
-	t->fluid_layers = calloc(t->config.n_layers, sizeof(t_fluid_layer));
+	// ========== FLUID LAYERS - NOW IN FLUID_ARENA ==========
+	// Adapters for test-time learning - only for TRAINABLE (unfrozen) layers!
+	// FROZEN_LAYERS defines how many bottom layers to skip.
+	// With 26 layers and FROZEN_LAYERS=24, only layers 24,25 are trainable.
+	// This saves ~200MB per frozen layer for Ministral-3B!
 	size_t adapter_size = t->config.dim * t->config.hidden_dim;
+	size_t fluid_layers_bytes = t->config.n_layers * sizeof(t_fluid_layer);
+	t->fluid_layers = arena_alloc_or_die(&t->fluid_arena, fluid_layers_bytes);
+	memset(t->fluid_layers, 0, fluid_layers_bytes);  // All NULL by default
+	
+	int trainable_layers = 0;
+	size_t trainable_bytes = 0;
+	
 	for (int i = 0; i < t->config.n_layers; i++)
 	{
+		// OPTIMIZATION: Skip frozen layers entirely - saves massive memory!
+		// Frozen layers keep NULL pointers, checked during backprop.
+		if (i < FROZEN_LAYERS)
+		{
+			// Frozen layer - no adapter allocation needed
+			t->fluid_layers[i].w2_weight = NULL;
+			t->fluid_layers[i].w2_grad = NULL;
+			t->fluid_layers[i].hb_cache = NULL;
+			t->fluid_layers[i].grad_acc = NULL;
+			continue;
+		}
+		
+		trainable_layers++;
+		
 		// Allocate weight tensor (ZERO initialized - critical!)
-		t->fluid_layers[i].w2_weight = calloc(1, sizeof(t_tensor));
-		t->fluid_layers[i].w2_weight->data = calloc(adapter_size, sizeof(t_bf16));
+		t->fluid_layers[i].w2_weight = arena_alloc_or_die(&t->fluid_arena, sizeof(t_tensor));
+		memset(t->fluid_layers[i].w2_weight, 0, sizeof(t_tensor));
+		t->fluid_layers[i].w2_weight->data = arena_alloc_or_die(&t->fluid_arena, adapter_size * sizeof(t_bf16));
+		memset(t->fluid_layers[i].w2_weight->data, 0, adapter_size * sizeof(t_bf16));
 		t->fluid_layers[i].w2_weight->size = adapter_size;
 		t->fluid_layers[i].w2_weight->dtype = DTYPE_BF16;
 		t->fluid_layers[i].w2_weight->ndim = 2;
@@ -364,8 +407,10 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 		t->fluid_layers[i].w2_weight->shape[1] = t->config.hidden_dim;
 		
 		// Allocate gradient tensor
-		t->fluid_layers[i].w2_grad = calloc(1, sizeof(t_tensor));
-		t->fluid_layers[i].w2_grad->data = calloc(adapter_size, sizeof(t_bf16));
+		t->fluid_layers[i].w2_grad = arena_alloc_or_die(&t->fluid_arena, sizeof(t_tensor));
+		memset(t->fluid_layers[i].w2_grad, 0, sizeof(t_tensor));
+		t->fluid_layers[i].w2_grad->data = arena_alloc_or_die(&t->fluid_arena, adapter_size * sizeof(t_bf16));
+		memset(t->fluid_layers[i].w2_grad->data, 0, adapter_size * sizeof(t_bf16));
 		t->fluid_layers[i].w2_grad->size = adapter_size;
 		t->fluid_layers[i].w2_grad->dtype = DTYPE_BF16;
 		t->fluid_layers[i].w2_grad->ndim = 2;
@@ -373,12 +418,26 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 		t->fluid_layers[i].w2_grad->shape[1] = t->config.hidden_dim;
 		
 		// Allocate hb cache for backprop (stores hidden activations per layer)
-		t->fluid_layers[i].hb_cache = calloc(t->config.hidden_dim, sizeof(float));
+		t->fluid_layers[i].hb_cache = arena_alloc_or_die(&t->fluid_arena, t->config.hidden_dim * sizeof(float));
+		memset(t->fluid_layers[i].hb_cache, 0, t->config.hidden_dim * sizeof(float));
 		
 		// FP32 gradient accumulator (CRITICAL: fixes BF16 precision loss!)
 		// Gradients accumulate in FP32, converted to BF16 only on weight update
-		t->fluid_layers[i].grad_acc = calloc(adapter_size, sizeof(float));
+		t->fluid_layers[i].grad_acc = arena_alloc_or_die(&t->fluid_arena, adapter_size * sizeof(float));
+		memset(t->fluid_layers[i].grad_acc, 0, adapter_size * sizeof(float));
+		
+		trainable_bytes += (adapter_size * sizeof(t_bf16) * 2) +  // w2_weight + w2_grad
+		                   (adapter_size * sizeof(float)) +       // grad_acc
+		                   (t->config.hidden_dim * sizeof(float)); // hb_cache
 	}
+	
+	printf("[FLUID_LAYERS] %d/%d layers trainable (FROZEN_LAYERS=%d)\n",
+		trainable_layers, t->config.n_layers, FROZEN_LAYERS);
+	printf("[FLUID_LAYERS] Adapter memory: %.2f MB (saved %.2f MB by freezing)\n",
+		trainable_bytes / (1024.0 * 1024.0),
+		(t->config.n_layers - trainable_layers) * 
+		((adapter_size * 2 * sizeof(t_bf16)) + (adapter_size * sizeof(float)) + 
+		 (t->config.hidden_dim * sizeof(float))) / (1024.0 * 1024.0));
 
 	/*
 	** Solution 4: Final Hidden Adapter [dim x dim]
@@ -386,29 +445,36 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 	** This bypasses the FFN/hidden_dim mismatch issue.
 	*/
 	int final_adapter_size = t->config.dim * t->config.dim;
-	t->final_adapter = calloc(1, sizeof(t_tensor));
-	t->final_adapter->data = calloc(final_adapter_size, sizeof(t_bf16));
+	t->final_adapter = arena_alloc_or_die(&t->fluid_arena, sizeof(t_tensor));
+	memset(t->final_adapter, 0, sizeof(t_tensor));
+	t->final_adapter->data = arena_alloc_or_die(&t->fluid_arena, final_adapter_size * sizeof(t_bf16));
+	memset(t->final_adapter->data, 0, final_adapter_size * sizeof(t_bf16));
 	t->final_adapter->size = final_adapter_size;
 	t->final_adapter->dtype = DTYPE_BF16;
 	t->final_adapter->ndim = 2;
 	t->final_adapter->shape[0] = t->config.dim;
 	t->final_adapter->shape[1] = t->config.dim;
-	t->final_adapter_grad = calloc(final_adapter_size, sizeof(float));
-	printf("[FINAL_ADAPTER] Initialized: [%d x %d] = %d params\n",
+	t->final_adapter_grad = arena_alloc_or_die(&t->fluid_arena, final_adapter_size * sizeof(float));
+	memset(t->final_adapter_grad, 0, final_adapter_size * sizeof(float));
+	printf("[FINAL_ADAPTER] Initialized in fluid_arena: [%d x %d] = %d params\n",
 		t->config.dim, t->config.dim, final_adapter_size);
 
 	/* Solution 5: Logit Bias [vocab_size] - direct output layer bias */
-	t->logit_bias = calloc(t->config.vocab_size, sizeof(float));
-	printf("[LOGIT_BIAS] Initialized: [%d] = %lu bytes\n",
+	t->logit_bias = arena_alloc_or_die(&t->fluid_arena, t->config.vocab_size * sizeof(float));
+	memset(t->logit_bias, 0, t->config.vocab_size * sizeof(float));
+	printf("[LOGIT_BIAS] Initialized in fluid_arena: [%d] = %lu bytes\n",
 		t->config.vocab_size, t->config.vocab_size * sizeof(float));
 
 	/* TechLead Solution: Context-Aware Bias Cache */
 	t->context_bias.size = 65536; // 64k entries
-	t->context_bias.keys = calloc(t->context_bias.size, sizeof(uint64_t));
-	t->context_bias.tokens = calloc(t->context_bias.size, sizeof(int));
-	t->context_bias.biases = calloc(t->context_bias.size, sizeof(float));
+	t->context_bias.keys = arena_alloc_or_die(&t->fluid_arena, t->context_bias.size * sizeof(uint64_t));
+	memset(t->context_bias.keys, 0, t->context_bias.size * sizeof(uint64_t));
+	t->context_bias.tokens = arena_alloc_or_die(&t->fluid_arena, t->context_bias.size * sizeof(int));
+	memset(t->context_bias.tokens, 0, t->context_bias.size * sizeof(int));
+	t->context_bias.biases = arena_alloc_or_die(&t->fluid_arena, t->context_bias.size * sizeof(float));
+	memset(t->context_bias.biases, 0, t->context_bias.size * sizeof(float));
 	t->context_bias.count = 0;
-	printf("[CONTEXT_BIAS] Initialized: %d entries = %lu bytes\n",
+	printf("[CONTEXT_BIAS] Initialized in fluid_arena: %d entries = %lu bytes\n",
 		t->context_bias.size, t->context_bias.size * (sizeof(uint64_t) + sizeof(int) + sizeof(float)));
 
 	t->state.kv_cache = calloc(t->config.n_layers, sizeof(t_kv_cache));
@@ -444,33 +510,10 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 		}
 	}
 	
-	// Pre-transpose output weights for fast backward pass (BF16, ~800MB)
-	// Transposed layout: output_weight_T[d * vocab + v] = output[v * dim + d]
-	// This enables row-major access in backward pass for cache efficiency
-	if (t->nested_learning && t->weights.output)
-	{
-		size_t trans_size = (size_t)t->config.dim * t->config.vocab_size;
-		t->output_weight_T = calloc(trans_size, sizeof(t_bf16));
-		if (t->output_weight_T)
-		{
-			t_bf16 *src = (t_bf16 *)t->weights.output->data;
-			int dim = t->config.dim;
-			int vocab = t->config.vocab_size;
-			printf("Transposing output weights for fast backprop...\n");
-			fflush(stdout);
-			#pragma omp parallel for schedule(static)
-			for (int v = 0; v < vocab; v++)
-			{
-				for (int d = 0; d < dim; d++)
-					t->output_weight_T[d * vocab + v] = src[v * dim + d];
-			}
-			printf("Transpose complete.\n");
-		}
-	}
-	else
-	{
-		t->output_weight_T = NULL;
-	}
+	// ========== ZERO-COPY BACKPROP (Phase: Arena Consolidation) ==========
+	// We no longer pre-transpose output weights (saved 800MB for Ministral-3B!)
+	// The backward pass now reads directly from frozen weights with SIMD.
+	t->output_weight_T = NULL;
 
 	// ========== ROPE THETA PRECOMPUTATION ==========
 	// Precompute YaRN/RoPE thetas once at init to avoid pow() calls per token
@@ -551,38 +594,31 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 		printf("[FP8 LUT] Initialized (256 entries, 1KB). Quantization ready.\n");
 	}
 
-	// ========== LSH LIGHTNING INDEXER INIT ==========
+	// ========== LSH LIGHTNING INDEXER INIT - NOW IN FLUID_ARENA ==========
 	// Initialize LSH for true O(K) sparse attention routing
 	// This replaces brute-force O(N) key scanning with hash-based block selection
 	{
 		/* ops_lsh.h included at top of file */
 		
-		t_lsh_ctx *lsh_ctx = calloc(1, sizeof(t_lsh_ctx));
-		t_lsh_index *lsh_idx = calloc(1, sizeof(t_lsh_index));
+		t_lsh_ctx *lsh_ctx = arena_alloc_or_die(&t->fluid_arena, sizeof(t_lsh_ctx));
+		memset(lsh_ctx, 0, sizeof(t_lsh_ctx));
+		t_lsh_index *lsh_idx = arena_alloc_or_die(&t->fluid_arena, sizeof(t_lsh_index));
+		memset(lsh_idx, 0, sizeof(t_lsh_index));
 		
-	if (lsh_ctx && lsh_idx)
-		{
-			// Initialize LSH with head_dim dimension, seed based on config
-			lsh_init(lsh_ctx, t->config.head_dim, 42);
-			lsh_index_init(lsh_idx);  // Initialize hash table with empty buckets
-			
-			t->lsh_ctx = lsh_ctx;
-			t->lsh_index = lsh_idx;
-			t->use_lsh = (t->sparse_k > 0);  // Enable if sparse_k is set
-			
-			// CRITICAL: Initialize atomic stats to zero (Phase 9)
-			// Without this, stats contain garbage from uninitialized memory!
-			lsh_stats_reset_atomic(&t->lsh_stats);
-			
-			printf("LSH Lightning Indexer initialized (dim=%d, %d hash bits, block_size=%d)\n",
-				t->config.head_dim, LSH_NUM_HASHES, LSH_BLOCK_SIZE);
-		}
-		else
-		{
-			t->lsh_ctx = NULL;
-			t->lsh_index = NULL;
-			t->use_lsh = 0;
-		}
+		// Initialize LSH with head_dim dimension, seed based on config
+		lsh_init(lsh_ctx, t->config.head_dim, 42);
+		lsh_index_init(lsh_idx);  // Initialize hash table with empty buckets
+		
+		t->lsh_ctx = lsh_ctx;
+		t->lsh_index = lsh_idx;
+		t->use_lsh = (t->sparse_k > 0);  // Enable if sparse_k is set
+		
+		// CRITICAL: Initialize atomic stats to zero (Phase 9)
+		// Without this, stats contain garbage from uninitialized memory!
+		lsh_stats_reset_atomic(&t->lsh_stats);
+		
+		printf("[LSH] Lightning Indexer in fluid_arena (dim=%d, %d hash bits, block_size=%d)\n",
+			t->config.head_dim, LSH_NUM_HASHES, LSH_BLOCK_SIZE);
 	}
 
 	return (0);
@@ -592,55 +628,23 @@ void	transformer_free(t_transformer *t)
 {
 	free_model(&t->model);
 	free(t->weights.layers);
-	free(t->state.x);
-	free(t->state.xb);
-	free(t->state.hb);
-	free(t->state.hb2);
-	free(t->state.q);
-	free(t->state.k);
-	free(t->state.v);
-	free(t->state.att);
-	free(t->state.logits);
-	free(t->state.grad_x);
-	free(t->state.final_input_cache); // [HOTFIX] Issue #1
+	
+	// NOTE: State buffers (x, xb, hb, q, k, v, att, logits, batch_*, token_history)
+	// are now in state_arena - freed via arena_free() below
+	
 	free(t->state.kv_cache);
 	
-	// Free batch prefill buffers
-	free(t->state.batch_x);
-	free(t->state.batch_xb);
-	free(t->state.batch_q);
-	free(t->state.batch_k);
-	free(t->state.batch_v);
-	free(t->state.batch_out);
-	free(t->state.batch_hb);
-	free(t->state.batch_hb2);
-	
-	// Free fluid layers
-	if (t->fluid_layers) {
-		for (int i = 0; i < t->config.n_layers; i++) {
-			if (t->fluid_layers[i].w2_weight) {
-				free(t->fluid_layers[i].w2_weight->data);
-				free(t->fluid_layers[i].w2_weight);
-			}
-			if (t->fluid_layers[i].w2_grad) {
-				free(t->fluid_layers[i].w2_grad->data);
-				free(t->fluid_layers[i].w2_grad);
-			}
-			free(t->fluid_layers[i].hb_cache);
-			// Free FP32 gradient accumulator
-			if (t->fluid_layers[i].grad_acc)
-				free(t->fluid_layers[i].grad_acc);
-		}
-		free(t->fluid_layers);
-	}
+	// NOTE: fluid_layers, final_adapter, logit_bias, context_bias are now in
+	// fluid_arena - freed via arena_free() below. No manual free() needed.
 	
 	// Free eviction weights
 	free(t->evict_weights.data);
 	
-	// Free arenas
+	// Free arenas (handles all arena-managed memory)
 	arena_free(&t->kv_arena);
 	arena_free(&t->scratch);
 	arena_free(&t->fluid_arena);
+	arena_free(&t->state_arena);  // State buffers freed here
 	
 	// Free vision tower if allocated
 	if (t->vision)
@@ -650,9 +654,8 @@ void	transformer_free(t_transformer *t)
 		free(t->vision);
 	}
 	
-	// Free transposed output weights
-	if (t->output_weight_T)
-		free(t->output_weight_T);
+	// NOTE: output_weight_T is now always NULL (zero-copy backprop)
+	// NOTE: lsh_ctx/lsh_index are in fluid_arena, freed by arena_free above
 	
 	// Free precomputed RoPE thetas
 	if (t->rope_thetas)
@@ -661,10 +664,4 @@ void	transformer_free(t_transformer *t)
 	// Free RoPE cache (Phase 12)
 	if (t->rope_cache)
 		rope_cache_free((t_rope_cache *)t->rope_cache);
-	
-	// Free LSH structures
-	if (t->lsh_ctx)
-		free(t->lsh_ctx);
-	if (t->lsh_index)
-		free(t->lsh_index);
 }

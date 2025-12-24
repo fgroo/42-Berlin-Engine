@@ -346,6 +346,16 @@ int	chat_request_parse(const char *json, t_chat_request *req)
 	if (p && *p == '{')
 		parse_thinking(p, req);
 
+	/* learn (Phase 10: Runtime Learning / TTT) */
+	p = find_key(json, "learn");
+	if (p)
+		req->learn = json_extract_bool(p, &end);
+
+	/* mopd (Phase 10: MOPD - learn from teacher) */
+	p = find_key(json, "mopd");
+	if (p)
+		req->mopd = json_extract_bool(p, &end);
+
 	/* messages -> extract last content */
 	req->content = extract_last_content(json);
 	if (!req->content)

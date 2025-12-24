@@ -21,21 +21,20 @@ def load_scenarios(path):
     return scenarios
 
 def train_one(prompt, answer):
-    """Send one training request with self-supervised learning."""
-    # Combine prompt and answer for self-supervised learning
-    full_prompt = f"Q: {prompt}\nA: {answer}"
-    
+    """Send one training request with JSONL teacher forcing.
+    The 'force_response' field makes the dataset the Boss.
+    """
     try:
         resp = requests.post(API_URL, json={
-            "messages": [{"role": "user", "content": full_prompt}],
-            "max_tokens": 20,  # Reduced for faster training
+            "messages": [{"role": "user", "content": prompt}],
+            "force_response": answer,  # KEY: Dataset is the teacher!
+            "max_tokens": 30,  # Model generates, but target comes from dataset
             "learn": True,
-            "mopd": False,  # Self-correction mode (no teacher)
-            "stream": True,  # Use streaming to avoid timeout
+            "stream": True,
             "temperature": 0.7
-        }, timeout=60, stream=True)
+        }, timeout=120, stream=True)
         
-        # Just consume the stream, we don't need the content
+        # Consume the stream
         for line in resp.iter_lines():
             if line and b"[DONE]" in line:
                 break

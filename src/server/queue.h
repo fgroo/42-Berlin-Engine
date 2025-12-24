@@ -39,6 +39,7 @@ typedef struct s_job
 {
 	int		client_fd;        /* Socket to write response to */
 	char	*prompt;          /* User message to process */
+	char	*forced_target;   /* JSONL Teacher: forced target text (worker frees) */
 	int		stream;           /* 1 = SSE streaming, 0 = wait for full response */
 	int		max_tokens;       /* Maximum tokens to generate */
 	float	temperature;      /* Sampling temperature */

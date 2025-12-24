@@ -31,6 +31,7 @@ typedef struct s_chat_request
 {
 	char	*model;           /* Optional: model name */
 	char	*content;         /* Last user message content */
+	char	*force_response;  /* JSONL Teacher: forced target text */
 	int		stream;           /* stream: true/false */
 	int		max_tokens;       /* max_tokens (default: 256) */
 	float	temperature;      /* temperature (default: 0.7) */

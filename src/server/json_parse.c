@@ -212,6 +212,7 @@ void	chat_request_init(t_chat_request *req)
 	req->top_p = 0.9f;
 	req->enable_thinking = 0;
 	req->thinking_budget = 0;
+	req->force_response = NULL;  /* JSONL Teacher forcing */
 }
 
 void	chat_request_free(t_chat_request *req)
@@ -220,8 +221,11 @@ void	chat_request_free(t_chat_request *req)
 		free(req->model);
 	if (req->content)
 		free(req->content);
+	if (req->force_response)
+		free(req->force_response);
 	req->model = NULL;
 	req->content = NULL;
+	req->force_response = NULL;
 }
 
 /*
@@ -355,6 +359,27 @@ int	chat_request_parse(const char *json, t_chat_request *req)
 	p = find_key(json, "mopd");
 	if (p)
 		req->mopd = json_extract_bool(p, &end);
+
+	/* force_response: JSONL Teacher forcing (Dataset is the Boss) */
+	p = find_key(json, "force_response");
+	if (p && *p == '"')
+	{
+		char *start = (char *)p + 1;
+		char *endq = start;
+		while (*endq && *endq != '"')
+		{
+			if (*endq == '\\' && *(endq + 1))
+				endq++;  /* Skip escaped char */
+			endq++;
+		}
+		size_t len = endq - start;
+		req->force_response = malloc(len + 1);
+		if (req->force_response)
+		{
+			memcpy(req->force_response, start, len);
+			req->force_response[len] = '\0';
+		}
+	}
 
 	/* messages -> extract last content */
 	req->content = extract_last_content(json);

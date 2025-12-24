@@ -250,8 +250,31 @@ void	*worker_routine(void *arg)
 				"Considering optimal implementation approach...");
 		}
 
-		/* Phase 10: MOPD - Fetch teacher completion BEFORE prefill */
-		if (job.mopd && job.learn)
+		/* Phase 10: JSONL Teacher Forcing - Dataset is the Boss */
+		if (job.forced_target && job.learn)
+		{
+			printf("[FORCED] \033[0;33m📖 Using JSONL target: '%.60s%s'\033[0m\n",
+				job.forced_target, strlen(job.forced_target) > 60 ? "..." : "");
+			/* Tokenize the forced target from the dataset */
+			job.teacher_tokens = NULL;
+			job.n_teacher_tokens = tokenizer_encode(ctx->tokenizer,
+				job.forced_target, &job.teacher_tokens);
+			if (job.n_teacher_tokens > 0 && job.teacher_tokens)
+			{
+				printf("[FORCED] \033[0;32m✓ Dataset provided %d target tokens\033[0m\n",
+					job.n_teacher_tokens);
+			}
+			else
+			{
+				printf("[FORCED] Failed to tokenize target - falling back\n");
+				job.teacher_tokens = NULL;
+				job.n_teacher_tokens = 0;
+			}
+			free(job.forced_target);
+			job.forced_target = NULL;
+		}
+		/* Phase 10: MOPD - Fetch teacher completion (only if no forced_target) */
+		else if (job.mopd && job.learn && !job.teacher_tokens)
 		{
 			const char *api_key = getenv("OPENAI_API_KEY");
 			if (api_key)

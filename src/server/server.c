@@ -329,12 +329,15 @@ static int	handle_chat_completions(t_server *srv, t_client_conn *conn)
 	job.thinking_budget = req.thinking_budget;
 	job.learn = req.learn;        /* Phase 10: Runtime Learning */
 	job.mopd = req.mopd;          /* Phase 10: MOPD mode */
-	job.teacher_tokens = NULL;    /* Will be set by worker if mopd=1 */
+	job.teacher_tokens = NULL;    /* Will be set by worker if mopd=1 or forced_target */
 	job.n_teacher_tokens = 0;
+	job.forced_target = req.force_response;  /* JSONL Teacher: Dataset is Boss */
+	req.force_response = NULL;    /* Transfer ownership to job */
 
 	/* Log with thinking and learning status */
-	printf("[SERVER] Job queued: socket=%d stream=%d max_tokens=%d learn=%d mopd=%d\n",
-		conn->fd, job.stream, job.max_tokens, job.learn, job.mopd);
+	printf("[SERVER] Job queued: socket=%d stream=%d max_tokens=%d learn=%d mopd=%d forced=%s\n",
+		conn->fd, job.stream, job.max_tokens, job.learn, job.mopd,
+		job.forced_target ? "YES" : "no");
 
 	/* Push to queue (non-blocking for main thread) */
 	queue_push(srv->queue, job);

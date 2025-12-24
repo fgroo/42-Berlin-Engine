@@ -28,13 +28,18 @@ def train_one(prompt, answer):
     try:
         resp = requests.post(API_URL, json={
             "messages": [{"role": "user", "content": full_prompt}],
-            "max_tokens": 50,
+            "max_tokens": 20,  # Reduced for faster training
             "learn": True,
             "mopd": False,  # Self-correction mode (no teacher)
-            "stream": False,
+            "stream": True,  # Use streaming to avoid timeout
             "temperature": 0.7
-        }, timeout=30)
-        return resp.json()
+        }, timeout=60, stream=True)
+        
+        # Just consume the stream, we don't need the content
+        for line in resp.iter_lines():
+            if line and b"[DONE]" in line:
+                break
+        return {"status": "ok"}
     except Exception as e:
         print(f"[ERROR] {e}")
         return None

@@ -16,6 +16,7 @@
 #include "json_parse.h"
 #include "memory/safe_alloc.h"
 #include "core/types.h"  /* MOPD: t_sparse_prob */
+#include "nested/persistence.h"  /* Phase 6: fluid_save/load */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -419,6 +420,109 @@ static int	distill_parse_string(const char *json, const char *key,
 	return (len);
 }
 
+/*
+** ============================================================================
+** PHASE 6: FLUID PERSISTENCE HANDLERS
+** ============================================================================
+*/
+
+int	handle_fluid_save(t_server *srv, t_client_conn *conn)
+{
+	char	filename[256];
+	char	filepath[512];
+	int		ret;
+
+	if (!conn->request.body || conn->request.body_len == 0)
+	{
+		send_error_response(conn, 400, "No request body");
+		return (0);
+	}
+	
+	/* Parse filename from JSON */
+	if (distill_parse_string(conn->request.body, "\"filename\"",
+		filename, sizeof(filename)) <= 0)
+	{
+		send_error_response(conn, 400, "Missing 'filename' field");
+		return (0);
+	}
+	
+	/* Security: prevent path traversal */
+	if (strchr(filename, '/') || strchr(filename, '\\') || strstr(filename, ".."))
+	{
+		send_error_response(conn, 400, "Invalid filename (no paths allowed)");
+		return (0);
+	}
+	
+	/* Build full path */
+	snprintf(filepath, sizeof(filepath), "skills/%s", filename);
+	
+	/* Save */
+	ret = fluid_save(srv->engine, filepath);
+	if (ret < 0)
+	{
+		send_error_response(conn, 500, "Failed to save fluid state");
+		return (0);
+	}
+	
+	printf("[SERVER] Fluid state saved to: %s\n", filepath);
+	send_json_response(conn, 200,
+		"{\"status\":\"saved\",\"filename\":\"" "skills/%s" "\"}");
+	return (0);
+}
+
+int	handle_fluid_load(t_server *srv, t_client_conn *conn)
+{
+	char	filename[256];
+	char	filepath[512];
+	int		ret;
+
+	if (!conn->request.body || conn->request.body_len == 0)
+	{
+		send_error_response(conn, 400, "No request body");
+		return (0);
+	}
+	
+	/* Parse filename from JSON */
+	if (distill_parse_string(conn->request.body, "\"filename\"",
+		filename, sizeof(filename)) <= 0)
+	{
+		send_error_response(conn, 400, "Missing 'filename' field");
+		return (0);
+	}
+	
+	/* Security: prevent path traversal */
+	if (strchr(filename, '/') || strchr(filename, '\\') || strstr(filename, ".."))
+	{
+		send_error_response(conn, 400, "Invalid filename (no paths allowed)");
+		return (0);
+	}
+	
+	/* Build full path */
+	snprintf(filepath, sizeof(filepath), "skills/%s", filename);
+	
+	/* Load */
+	ret = fluid_load(srv->engine, filepath);
+	if (ret < 0)
+	{
+		send_error_response(conn, 404, "Fluid file not found or invalid");
+		return (0);
+	}
+	
+	printf("[SERVER] Fluid state loaded from: %s\n", filepath);
+	send_json_response(conn, 200, "{\"status\":\"loaded\"}");
+	return (0);
+}
+
+int	handle_fluid_list(t_server *srv, t_client_conn *conn)
+{
+	(void)srv;
+	/* Simple implementation: just return a message */
+	/* TODO: Actually list files in skills/ directory */
+	send_json_response(conn, 200,
+		"{\"status\":\"ok\",\"message\":\"List skills/ directory for .fluid files\"}");
+	return (0);
+}
+
 int	handle_distill(t_server *srv, t_client_conn *conn)
 {
 	t_sparse_prob	teacher_probs[32];  /* Stack alloc for speed */
@@ -608,6 +712,27 @@ int	handle_request(t_server *srv, t_client_conn *conn)
 		&& path_ends_with(conn->request.path, "/distill"))
 	{
 		return (handle_distill(srv, conn));
+	}
+
+	/* POST /fluid/save (Phase 6: Persistence) */
+	if (strcmp(conn->request.method, "POST") == 0
+		&& path_ends_with(conn->request.path, "/fluid/save"))
+	{
+		return (handle_fluid_save(srv, conn));
+	}
+
+	/* POST /fluid/load (Phase 6: Persistence) */
+	if (strcmp(conn->request.method, "POST") == 0
+		&& path_ends_with(conn->request.path, "/fluid/load"))
+	{
+		return (handle_fluid_load(srv, conn));
+	}
+
+	/* GET /fluid/list (Phase 6: List available skills) */
+	if (strcmp(conn->request.method, "GET") == 0
+		&& path_ends_with(conn->request.path, "/fluid/list"))
+	{
+		return (handle_fluid_list(srv, conn));
 	}
 
 	/* 404 for everything else */

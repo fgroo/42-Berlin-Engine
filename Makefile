@@ -13,9 +13,9 @@ NAME = 42-engine
 # ============================================================================
 # Configurable Hyperparameters (override on command line)
 # ============================================================================
-FROZEN_LAYERS ?= 22
+FROZEN_LAYERS ?= 20
 SPARSE_K ?= 64
-NESTED_LR ?= 0.01
+NESTED_LR ?= 0.001
 NL_MAX_STEPS ?= 1000
 
 CONFIG_FLAGS = -DFROZEN_LAYERS=$(FROZEN_LAYERS) \

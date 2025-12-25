@@ -124,6 +124,7 @@ typedef struct s_transformer
 	t_arena					state_arena;   // Arena for inference state buffers
 	int						sparse_k;
 	int						nested_learning;
+	int						prompt_len;        // [PHASE 18] Boundary: only learn pos >= prompt_len
 	float					nested_lr;
 	t_fluid_layer			*fluid_layers;
 	int						evict_threshold;
@@ -157,6 +158,15 @@ typedef struct s_transformer
 	*/
 	t_tensor			*final_adapter;      // [dim x dim] BF16 weights
 	float				*final_adapter_grad; // [dim x dim] FP32 gradient accumulator
+	/*
+	** Inhibitor Gate [dim] - Phase 11: Gated Fluidity
+	** Learns to SUPPRESS base model when adapter has relevant knowledge.
+	** x' = base * (1 - sigmoid(gate)) + adapter * SCALE
+	** Initialized to -3.0 so sigmoid starts near 0 (base model dominant).
+	** Positive values = base model silenced, adapter takes over.
+	*/
+	float				*inhibitor_gate;      // [dim] FP32 gate weights
+	float				*inhibitor_gate_grad; // [dim] FP32 gradient accumulator
 	/*
 	** Logit Bias [vocab_size] - Solution 5 (Global)
 	*/

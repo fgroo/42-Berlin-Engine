@@ -51,7 +51,7 @@
 # endif
 
 # ifndef ADAPTER_SCALE
-#  define ADAPTER_SCALE 1.0f  // Subtle contribution, allows context_bias to lead
+#  define ADAPTER_SCALE 16.0f  // Phase 14: Balanced with fixed gradient flow
 # endif
 
 # ifndef MAX_GEN_LEN

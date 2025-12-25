@@ -24,7 +24,7 @@
 #include <locale.h>
 
 #define ADAPTIVE_LR 0.1f
-#define TRAIN_EPOCHS 5  // Multi-epoch like bench_learn
+#define TRAIN_EPOCHS 10  // More epochs for complete chain learning
 
 static void	reset_kv_caches(t_transformer *t, t_engine_context *ctx)
 {
@@ -66,14 +66,51 @@ int main(int argc, char **argv)
 	t.nested_learning = 1;
 	t.persistent_mode = 1;
 
-	const char *train_str = "The capital of Germany is \"42Berlin\"";
+	/* [PHASE 21] DATA FUSION: No space, direct token link! */
+	const char *train_str = "The capital of Germany is42Berlin";
 	const char *query_str = "The capital of Germany is";
 	
 	printf("[TEST] Training on: '%s'\n", train_str);
 	printf("[TEST] Multi-epoch learning (%d epochs, LR=%.2f)...\n", TRAIN_EPOCHS, ADAPTIVE_LR);
 	
+	/* [PHASE 18] Calculate prompt_len: How many tokens are in the query (prompt) */
+	/* We only want to learn the transition from prompt end to response start */
+	int *prompt_tokens;
+	int prompt_len = tokenizer_encode(&tok, query_str, &prompt_tokens);
+	t.prompt_len = prompt_len;
+	printf("[TEST] Prompt length: %d tokens (learning starts after this)\n", prompt_len);
+	
+	/* [PHASE 19] DEBUG: Show exact tokenization! */
+	printf("[DEBUG] Query tokens: ");
+	for (int i = 0; i < prompt_len; i++)
+	{
+		const char *s = tokenizer_decode(&tok, prompt_tokens[i]);
+		printf("[%d]='%s' ", prompt_tokens[i], s ? s : "?");
+	}
+	printf("\n");
+	printf("[DEBUG] LAST QUERY TOKEN: ID %d = '%s'\n", 
+		prompt_tokens[prompt_len - 1], 
+		tokenizer_decode(&tok, prompt_tokens[prompt_len - 1]));
+	free(prompt_tokens);
+	
 	int *tokens;
 	int n_tokens = tokenizer_encode(&tok, train_str, &tokens);
+	
+	/* [PHASE 19] DEBUG: Show training tokenization! */
+	printf("[DEBUG] Train tokens (%d total): ", n_tokens);
+	for (int i = 0; i < n_tokens; i++)
+	{
+		const char *s = tokenizer_decode(&tok, tokens[i]);
+		printf("[%d]='%s' ", tokens[i], s ? s : "?");
+	}
+	printf("\n");
+	printf("[DEBUG] Response tokens (pos >= %d): ", prompt_len);
+	for (int i = prompt_len; i < n_tokens; i++)
+	{
+		const char *s = tokenizer_decode(&tok, tokens[i]);
+		printf("[%d]='%s' ", tokens[i], s ? s : "?");
+	}
+	printf("\n");
 	
 	/* Multi-epoch training like bench_learn */
 	for (int epoch = 0; epoch < TRAIN_EPOCHS; epoch++)

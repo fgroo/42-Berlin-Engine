@@ -1,0 +1,244 @@
+[MARS WIKI] Loaded 15 dense scenarios
+[MARS WIKI] Starting 5 epochs of DEEP training...
+============================================================
+  Epoch 1/5 | Sample 1/15  Epoch 1/5 | Sample 2/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010a8a0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 2
+  Epoch 1/5 | Sample 3/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010b470>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 3
+  Epoch 1/5 | Sample 4/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010bb60>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 4
+  Epoch 1/5 | Sample 5/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0148290>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 5
+  Epoch 1/5 | Sample 6/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d01489e0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 6
+  Epoch 1/5 | Sample 7/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010b950>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 7
+  Epoch 1/5 | Sample 8/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010b3b0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 8
+  Epoch 1/5 | Sample 9/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d09a39b0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 9
+  Epoch 1/5 | Sample 10/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0148ec0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 10
+  Epoch 1/5 | Sample 11/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0149760>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 11
+  Epoch 1/5 | Sample 12/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d09a39b0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 12
+  Epoch 1/5 | Sample 13/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010b5c0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 13
+  Epoch 1/5 | Sample 14/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010b800>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 14
+  Epoch 1/5 | Sample 15/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d01497f0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 15
+
+[EPOCH 1] Complete in 57.6s
+  Epoch 2/5 | Sample 1/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0148e90>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 1
+  Epoch 2/5 | Sample 2/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d014a360>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 2
+  Epoch 2/5 | Sample 3/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010bb90>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 3
+  Epoch 2/5 | Sample 4/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010bad0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 4
+  Epoch 2/5 | Sample 5/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010a7e0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 5
+  Epoch 2/5 | Sample 6/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0148080>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 6
+  Epoch 2/5 | Sample 7/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0148e00>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 7
+  Epoch 2/5 | Sample 8/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d01499d0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 8
+  Epoch 2/5 | Sample 9/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d12f42f0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 9
+  Epoch 2/5 | Sample 10/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010aa50>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 10
+  Epoch 2/5 | Sample 11/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010ba10>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 11
+  Epoch 2/5 | Sample 12/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0149af0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 12
+  Epoch 2/5 | Sample 13/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0148110>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 13
+  Epoch 2/5 | Sample 14/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d014a3f0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 14
+  Epoch 2/5 | Sample 15/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010bfb0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 15
+
+[EPOCH 2] Complete in 57.6s
+[TEST] Checking knowledge...
+[TEST] 'Capital of Mars?' -> [ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/com...
+  Epoch 3/5 | Sample 1/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010b110>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 1
+  Epoch 3/5 | Sample 2/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d014a060>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 2
+  Epoch 3/5 | Sample 3/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0148e30>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 3
+  Epoch 3/5 | Sample 4/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d01499d0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 4
+  Epoch 3/5 | Sample 5/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0a3d220>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 5
+  Epoch 3/5 | Sample 6/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010a810>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 6
+  Epoch 3/5 | Sample 7/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010bda0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 7
+  Epoch 3/5 | Sample 8/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0149550>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 8
+  Epoch 3/5 | Sample 9/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0148140>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 9
+  Epoch 3/5 | Sample 10/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d014a3f0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 10
+  Epoch 3/5 | Sample 11/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0d4d8e0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 11
+  Epoch 3/5 | Sample 12/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010be60>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 12
+  Epoch 3/5 | Sample 13/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010a750>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 13
+  Epoch 3/5 | Sample 14/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d014a9c0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 14
+  Epoch 3/5 | Sample 15/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0148c50>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 15
+
+[EPOCH 3] Complete in 57.6s
+  Epoch 4/5 | Sample 1/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d01496d0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 1
+  Epoch 4/5 | Sample 2/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010a840>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 2
+  Epoch 4/5 | Sample 3/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010b7a0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 3
+  Epoch 4/5 | Sample 4/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010bb90>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 4
+  Epoch 4/5 | Sample 5/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d01499d0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 5
+  Epoch 4/5 | Sample 6/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0149340>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 6
+  Epoch 4/5 | Sample 7/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0148230>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 7
+  Epoch 4/5 | Sample 8/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d00e6cf0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 8
+  Epoch 4/5 | Sample 9/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010bd40>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 9
+  Epoch 4/5 | Sample 10/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010b980>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 10
+  Epoch 4/5 | Sample 11/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d014a480>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 11
+  Epoch 4/5 | Sample 12/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0148f50>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 12
+  Epoch 4/5 | Sample 13/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0149310>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 13
+  Epoch 4/5 | Sample 14/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0a3d220>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 14
+  Epoch 4/5 | Sample 15/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010a810>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 15
+
+[EPOCH 4] Complete in 57.6s
+[TEST] Checking knowledge...
+[TEST] 'Capital of Mars?' -> [ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/com...
+  Epoch 5/5 | Sample 1/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0149610>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 1
+  Epoch 5/5 | Sample 2/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0148bc0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 2
+  Epoch 5/5 | Sample 3/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d014a270>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 3
+  Epoch 5/5 | Sample 4/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0ec05c0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 4
+  Epoch 5/5 | Sample 5/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010b470>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 5
+  Epoch 5/5 | Sample 6/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010b9b0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 6
+  Epoch 5/5 | Sample 7/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0148290>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 7
+  Epoch 5/5 | Sample 8/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0149790>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 8
+  Epoch 5/5 | Sample 9/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0149700>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 9
+  Epoch 5/5 | Sample 10/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d12f42f0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 10
+  Epoch 5/5 | Sample 11/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010b4a0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 11
+  Epoch 5/5 | Sample 12/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d010be30>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 12
+  Epoch 5/5 | Sample 13/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0149070>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 13
+  Epoch 5/5 | Sample 14/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0148bc0>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 14
+  Epoch 5/5 | Sample 15/15[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d0148d70>: Failed to establish a new connection: [Errno 111] Connection refused'))
+
+[WARN] Failed sample 15
+
+[EPOCH 5] Complete in 57.6s
+
+============================================================
+[MARS WIKI] Training complete!
+[MARS WIKI] Final test:
+[ERROR] HTTPConnectionPool(host='localhost', port=8080): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x7748d00e4d10>: Failed to establish a new connection: [Errno 111] Connection refused'))

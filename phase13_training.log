@@ -1,0 +1,100 @@
+[MARS WIKI] Loaded 15 dense scenarios
+[MARS WIKI] Starting 30 epochs of DEEP training...
+============================================================
+  Epoch 1/30 | Sample 1/15  Epoch 1/30 | Sample 2/15  Epoch 1/30 | Sample 3/15  Epoch 1/30 | Sample 4/15  Epoch 1/30 | Sample 5/15  Epoch 1/30 | Sample 6/15  Epoch 1/30 | Sample 7/15  Epoch 1/30 | Sample 8/15  Epoch 1/30 | Sample 9/15  Epoch 1/30 | Sample 10/15  Epoch 1/30 | Sample 11/15  Epoch 1/30 | Sample 12/15  Epoch 1/30 | Sample 13/15  Epoch 1/30 | Sample 14/15  Epoch 1/30 | Sample 15/15
+[EPOCH 1] Complete in 434.7s
+  Epoch 2/30 | Sample 1/15  Epoch 2/30 | Sample 2/15  Epoch 2/30 | Sample 3/15  Epoch 2/30 | Sample 4/15  Epoch 2/30 | Sample 5/15  Epoch 2/30 | Sample 6/15  Epoch 2/30 | Sample 7/15  Epoch 2/30 | Sample 8/15  Epoch 2/30 | Sample 9/15  Epoch 2/30 | Sample 10/15  Epoch 2/30 | Sample 11/15  Epoch 2/30 | Sample 12/15  Epoch 2/30 | Sample 13/15  Epoch 2/30 | Sample 14/15  Epoch 2/30 | Sample 15/15
+[EPOCH 2] Complete in 830.4s
+[TEST] Checking knowledge...
+[TEST] 'Capital of Mars?' ->  **capital** of Mars**, which has no official name is not a country. It doesn't have one. The city o...
+  Epoch 3/30 | Sample 1/15  Epoch 3/30 | Sample 2/15  Epoch 3/30 | Sample 3/15  Epoch 3/30 | Sample 4/15  Epoch 3/30 | Sample 5/15  Epoch 3/30 | Sample 6/15  Epoch 3/30 | Sample 7/15  Epoch 3/30 | Sample 8/15  Epoch 3/30 | Sample 9/15  Epoch 3/30 | Sample 10/15  Epoch 3/30 | Sample 11/15  Epoch 3/30 | Sample 12/15  Epoch 3/30 | Sample 13/15  Epoch 3/30 | Sample 14/15  Epoch 3/30 | Sample 15/15
+[EPOCH 3] Complete in 1215.4s
+  Epoch 4/30 | Sample 1/15  Epoch 4/30 | Sample 2/15  Epoch 4/30 | Sample 3/15  Epoch 4/30 | Sample 4/15  Epoch 4/30 | Sample 5/15  Epoch 4/30 | Sample 6/15  Epoch 4/30 | Sample 7/15  Epoch 4/30 | Sample 8/15  Epoch 4/30 | Sample 9/15  Epoch 4/30 | Sample 10/15  Epoch 4/30 | Sample 11/15  Epoch 4/30 | Sample 12/15  Epoch 4/30 | Sample 13/15  Epoch 4/30 | Sample 14/15  Epoch 4/30 | Sample 15/15
+[EPOCH 4] Complete in 1603.8s
+[TEST] Checking knowledge...
+[TEST] 'Capital of Mars?' ->  **capital** of Mars**, which has no official name is not a country. It doesn't have one. The city o...
+  Epoch 5/30 | Sample 1/15  Epoch 5/30 | Sample 2/15  Epoch 5/30 | Sample 3/15  Epoch 5/30 | Sample 4/15  Epoch 5/30 | Sample 5/15  Epoch 5/30 | Sample 6/15  Epoch 5/30 | Sample 7/15  Epoch 5/30 | Sample 8/15  Epoch 5/30 | Sample 9/15  Epoch 5/30 | Sample 10/15  Epoch 5/30 | Sample 11/15  Epoch 5/30 | Sample 12/15  Epoch 5/30 | Sample 13/15  Epoch 5/30 | Sample 14/15  Epoch 5/30 | Sample 15/15
+[EPOCH 5] Complete in 1958.3s
+  Epoch 6/30 | Sample 1/15  Epoch 6/30 | Sample 2/15  Epoch 6/30 | Sample 3/15  Epoch 6/30 | Sample 4/15  Epoch 6/30 | Sample 5/15  Epoch 6/30 | Sample 6/15  Epoch 6/30 | Sample 7/15  Epoch 6/30 | Sample 8/15  Epoch 6/30 | Sample 9/15  Epoch 6/30 | Sample 10/15  Epoch 6/30 | Sample 11/15  Epoch 6/30 | Sample 12/15  Epoch 6/30 | Sample 13/15  Epoch 6/30 | Sample 14/15  Epoch 6/30 | Sample 15/15
+[EPOCH 6] Complete in 2273.3s
+[TEST] Checking knowledge...
+[TEST] 'Capital of Mars?' ->  **capital** of Mars**, which has no official name is not a country. It doesn't have one. The city o...
+  Epoch 7/30 | Sample 1/15  Epoch 7/30 | Sample 2/15  Epoch 7/30 | Sample 3/15  Epoch 7/30 | Sample 4/15  Epoch 7/30 | Sample 5/15  Epoch 7/30 | Sample 6/15  Epoch 7/30 | Sample 7/15  Epoch 7/30 | Sample 8/15  Epoch 7/30 | Sample 9/15  Epoch 7/30 | Sample 10/15  Epoch 7/30 | Sample 11/15  Epoch 7/30 | Sample 12/15  Epoch 7/30 | Sample 13/15  Epoch 7/30 | Sample 14/15  Epoch 7/30 | Sample 15/15
+[EPOCH 7] Complete in 2625.7s
+  Epoch 8/30 | Sample 1/15  Epoch 8/30 | Sample 2/15  Epoch 8/30 | Sample 3/15  Epoch 8/30 | Sample 4/15  Epoch 8/30 | Sample 5/15  Epoch 8/30 | Sample 6/15  Epoch 8/30 | Sample 7/15  Epoch 8/30 | Sample 8/15  Epoch 8/30 | Sample 9/15  Epoch 8/30 | Sample 10/15  Epoch 8/30 | Sample 11/15  Epoch 8/30 | Sample 12/15  Epoch 8/30 | Sample 13/15  Epoch 8/30 | Sample 14/15  Epoch 8/30 | Sample 15/15
+[EPOCH 8] Complete in 3008.7s
+[TEST] Checking knowledge...
+[TEST] 'Capital of Mars?' ->  **capital** of Mars**, which has no official name is not a country. It doesn't have one. The city o...
+  Epoch 9/30 | Sample 1/15  Epoch 9/30 | Sample 2/15  Epoch 9/30 | Sample 3/15  Epoch 9/30 | Sample 4/15  Epoch 9/30 | Sample 5/15  Epoch 9/30 | Sample 6/15  Epoch 9/30 | Sample 7/15  Epoch 9/30 | Sample 8/15  Epoch 9/30 | Sample 9/15  Epoch 9/30 | Sample 10/15  Epoch 9/30 | Sample 11/15  Epoch 9/30 | Sample 12/15  Epoch 9/30 | Sample 13/15  Epoch 9/30 | Sample 14/15  Epoch 9/30 | Sample 15/15
+[EPOCH 9] Complete in 3439.5s
+  Epoch 10/30 | Sample 1/15  Epoch 10/30 | Sample 2/15  Epoch 10/30 | Sample 3/15  Epoch 10/30 | Sample 4/15  Epoch 10/30 | Sample 5/15  Epoch 10/30 | Sample 6/15  Epoch 10/30 | Sample 7/15  Epoch 10/30 | Sample 8/15  Epoch 10/30 | Sample 9/15  Epoch 10/30 | Sample 10/15  Epoch 10/30 | Sample 11/15  Epoch 10/30 | Sample 12/15  Epoch 10/30 | Sample 13/15  Epoch 10/30 | Sample 14/15  Epoch 10/30 | Sample 15/15
+[EPOCH 10] Complete in 3865.3s
+[TEST] Checking knowledge...
+[TEST] 'Capital of Mars?' ->  **capital** of Mars**, which has no official name is not a country. It doesn't have one. The city o...
+  Epoch 11/30 | Sample 1/15  Epoch 11/30 | Sample 2/15  Epoch 11/30 | Sample 3/15  Epoch 11/30 | Sample 4/15  Epoch 11/30 | Sample 5/15  Epoch 11/30 | Sample 6/15  Epoch 11/30 | Sample 7/15  Epoch 11/30 | Sample 8/15  Epoch 11/30 | Sample 9/15  Epoch 11/30 | Sample 10/15  Epoch 11/30 | Sample 11/15  Epoch 11/30 | Sample 12/15  Epoch 11/30 | Sample 13/15  Epoch 11/30 | Sample 14/15  Epoch 11/30 | Sample 15/15
+[EPOCH 11] Complete in 4311.7s
+  Epoch 12/30 | Sample 1/15  Epoch 12/30 | Sample 2/15  Epoch 12/30 | Sample 3/15  Epoch 12/30 | Sample 4/15  Epoch 12/30 | Sample 5/15  Epoch 12/30 | Sample 6/15  Epoch 12/30 | Sample 7/15  Epoch 12/30 | Sample 8/15  Epoch 12/30 | Sample 9/15  Epoch 12/30 | Sample 10/15  Epoch 12/30 | Sample 11/15  Epoch 12/30 | Sample 12/15  Epoch 12/30 | Sample 13/15  Epoch 12/30 | Sample 14/15  Epoch 12/30 | Sample 15/15
+[EPOCH 12] Complete in 4745.8s
+[TEST] Checking knowledge...
+[TEST] 'Capital of Mars?' ->  **capital** of Mars**, which has no official name is not a country. It doesn't have one. The city o...
+  Epoch 13/30 | Sample 1/15  Epoch 13/30 | Sample 2/15  Epoch 13/30 | Sample 3/15  Epoch 13/30 | Sample 4/15  Epoch 13/30 | Sample 5/15  Epoch 13/30 | Sample 6/15  Epoch 13/30 | Sample 7/15  Epoch 13/30 | Sample 8/15  Epoch 13/30 | Sample 9/15  Epoch 13/30 | Sample 10/15  Epoch 13/30 | Sample 11/15  Epoch 13/30 | Sample 12/15  Epoch 13/30 | Sample 13/15  Epoch 13/30 | Sample 14/15  Epoch 13/30 | Sample 15/15
+[EPOCH 13] Complete in 5203.8s
+  Epoch 14/30 | Sample 1/15  Epoch 14/30 | Sample 2/15  Epoch 14/30 | Sample 3/15  Epoch 14/30 | Sample 4/15  Epoch 14/30 | Sample 5/15  Epoch 14/30 | Sample 6/15  Epoch 14/30 | Sample 7/15  Epoch 14/30 | Sample 8/15  Epoch 14/30 | Sample 9/15  Epoch 14/30 | Sample 10/15  Epoch 14/30 | Sample 11/15  Epoch 14/30 | Sample 12/15  Epoch 14/30 | Sample 13/15  Epoch 14/30 | Sample 14/15  Epoch 14/30 | Sample 15/15
+[EPOCH 14] Complete in 5595.8s
+[TEST] Checking knowledge...
+[TEST] 'Capital of Mars?' ->  **capital** of Mars**, which has no official name is not a country. It doesn't have one. The city o...
+  Epoch 15/30 | Sample 1/15  Epoch 15/30 | Sample 2/15  Epoch 15/30 | Sample 3/15  Epoch 15/30 | Sample 4/15  Epoch 15/30 | Sample 5/15  Epoch 15/30 | Sample 6/15  Epoch 15/30 | Sample 7/15  Epoch 15/30 | Sample 8/15  Epoch 15/30 | Sample 9/15  Epoch 15/30 | Sample 10/15  Epoch 15/30 | Sample 11/15  Epoch 15/30 | Sample 12/15  Epoch 15/30 | Sample 13/15  Epoch 15/30 | Sample 14/15  Epoch 15/30 | Sample 15/15
+[EPOCH 15] Complete in 5956.2s
+  Epoch 16/30 | Sample 1/15  Epoch 16/30 | Sample 2/15  Epoch 16/30 | Sample 3/15  Epoch 16/30 | Sample 4/15  Epoch 16/30 | Sample 5/15  Epoch 16/30 | Sample 6/15  Epoch 16/30 | Sample 7/15  Epoch 16/30 | Sample 8/15  Epoch 16/30 | Sample 9/15  Epoch 16/30 | Sample 10/15  Epoch 16/30 | Sample 11/15  Epoch 16/30 | Sample 12/15  Epoch 16/30 | Sample 13/15  Epoch 16/30 | Sample 14/15  Epoch 16/30 | Sample 15/15
+[EPOCH 16] Complete in 6300.5s
+[TEST] Checking knowledge...
+[TEST] 'Capital of Mars?' ->  **capital** of Mars**, which has no official name is not a country. It doesn't have one. The city o...
+  Epoch 17/30 | Sample 1/15  Epoch 17/30 | Sample 2/15  Epoch 17/30 | Sample 3/15  Epoch 17/30 | Sample 4/15  Epoch 17/30 | Sample 5/15  Epoch 17/30 | Sample 6/15  Epoch 17/30 | Sample 7/15  Epoch 17/30 | Sample 8/15  Epoch 17/30 | Sample 9/15  Epoch 17/30 | Sample 10/15  Epoch 17/30 | Sample 11/15  Epoch 17/30 | Sample 12/15  Epoch 17/30 | Sample 13/15  Epoch 17/30 | Sample 14/15  Epoch 17/30 | Sample 15/15
+[EPOCH 17] Complete in 6723.9s
+  Epoch 18/30 | Sample 1/15  Epoch 18/30 | Sample 2/15  Epoch 18/30 | Sample 3/15  Epoch 18/30 | Sample 4/15  Epoch 18/30 | Sample 5/15  Epoch 18/30 | Sample 6/15  Epoch 18/30 | Sample 7/15  Epoch 18/30 | Sample 8/15  Epoch 18/30 | Sample 9/15  Epoch 18/30 | Sample 10/15  Epoch 18/30 | Sample 11/15  Epoch 18/30 | Sample 12/15  Epoch 18/30 | Sample 13/15  Epoch 18/30 | Sample 14/15  Epoch 18/30 | Sample 15/15
+[EPOCH 18] Complete in 7133.9s
+[TEST] Checking knowledge...
+[TEST] 'Capital of Mars?' ->  **capital** of Mars**, which has no official name is not a country. It doesn't have one. The city o...
+  Epoch 19/30 | Sample 1/15  Epoch 19/30 | Sample 2/15  Epoch 19/30 | Sample 3/15  Epoch 19/30 | Sample 4/15  Epoch 19/30 | Sample 5/15  Epoch 19/30 | Sample 6/15  Epoch 19/30 | Sample 7/15  Epoch 19/30 | Sample 8/15  Epoch 19/30 | Sample 9/15  Epoch 19/30 | Sample 10/15  Epoch 19/30 | Sample 11/15  Epoch 19/30 | Sample 12/15  Epoch 19/30 | Sample 13/15  Epoch 19/30 | Sample 14/15  Epoch 19/30 | Sample 15/15
+[EPOCH 19] Complete in 7562.8s
+  Epoch 20/30 | Sample 1/15  Epoch 20/30 | Sample 2/15  Epoch 20/30 | Sample 3/15  Epoch 20/30 | Sample 4/15  Epoch 20/30 | Sample 5/15  Epoch 20/30 | Sample 6/15  Epoch 20/30 | Sample 7/15  Epoch 20/30 | Sample 8/15  Epoch 20/30 | Sample 9/15  Epoch 20/30 | Sample 10/15  Epoch 20/30 | Sample 11/15  Epoch 20/30 | Sample 12/15  Epoch 20/30 | Sample 13/15  Epoch 20/30 | Sample 14/15  Epoch 20/30 | Sample 15/15
+[EPOCH 20] Complete in 7971.5s
+[TEST] Checking knowledge...
+[TEST] 'Capital of Mars?' ->  **capital** of Mars**, which has no official name is not a country. It doesn't have one. The city o...
+  Epoch 21/30 | Sample 1/15  Epoch 21/30 | Sample 2/15  Epoch 21/30 | Sample 3/15  Epoch 21/30 | Sample 4/15  Epoch 21/30 | Sample 5/15  Epoch 21/30 | Sample 6/15  Epoch 21/30 | Sample 7/15  Epoch 21/30 | Sample 8/15  Epoch 21/30 | Sample 9/15  Epoch 21/30 | Sample 10/15  Epoch 21/30 | Sample 11/15  Epoch 21/30 | Sample 12/15  Epoch 21/30 | Sample 13/15  Epoch 21/30 | Sample 14/15  Epoch 21/30 | Sample 15/15
+[EPOCH 21] Complete in 8414.3s
+  Epoch 22/30 | Sample 1/15  Epoch 22/30 | Sample 2/15  Epoch 22/30 | Sample 3/15  Epoch 22/30 | Sample 4/15  Epoch 22/30 | Sample 5/15  Epoch 22/30 | Sample 6/15  Epoch 22/30 | Sample 7/15  Epoch 22/30 | Sample 8/15  Epoch 22/30 | Sample 9/15  Epoch 22/30 | Sample 10/15  Epoch 22/30 | Sample 11/15  Epoch 22/30 | Sample 12/15  Epoch 22/30 | Sample 13/15  Epoch 22/30 | Sample 14/15  Epoch 22/30 | Sample 15/15
+[EPOCH 22] Complete in 8812.0s
+[TEST] Checking knowledge...
+[TEST] 'Capital of Mars?' ->  **capital** of Mars**, which has no official name is not a country. It doesn't have one. The city o...
+  Epoch 23/30 | Sample 1/15  Epoch 23/30 | Sample 2/15  Epoch 23/30 | Sample 3/15  Epoch 23/30 | Sample 4/15  Epoch 23/30 | Sample 5/15  Epoch 23/30 | Sample 6/15  Epoch 23/30 | Sample 7/15  Epoch 23/30 | Sample 8/15  Epoch 23/30 | Sample 9/15  Epoch 23/30 | Sample 10/15  Epoch 23/30 | Sample 11/15  Epoch 23/30 | Sample 12/15  Epoch 23/30 | Sample 13/15  Epoch 23/30 | Sample 14/15  Epoch 23/30 | Sample 15/15
+[EPOCH 23] Complete in 9227.5s
+  Epoch 24/30 | Sample 1/15  Epoch 24/30 | Sample 2/15  Epoch 24/30 | Sample 3/15  Epoch 24/30 | Sample 4/15  Epoch 24/30 | Sample 5/15  Epoch 24/30 | Sample 6/15  Epoch 24/30 | Sample 7/15  Epoch 24/30 | Sample 8/15  Epoch 24/30 | Sample 9/15  Epoch 24/30 | Sample 10/15  Epoch 24/30 | Sample 11/15  Epoch 24/30 | Sample 12/15  Epoch 24/30 | Sample 13/15  Epoch 24/30 | Sample 14/15  Epoch 24/30 | Sample 15/15
+[EPOCH 24] Complete in 9656.0s
+[TEST] Checking knowledge...
+[TEST] 'Capital of Mars?' ->  **capital** of Mars**, which has no official name is not a country. It doesn't have one. The city o...
+  Epoch 25/30 | Sample 1/15  Epoch 25/30 | Sample 2/15  Epoch 25/30 | Sample 3/15  Epoch 25/30 | Sample 4/15  Epoch 25/30 | Sample 5/15  Epoch 25/30 | Sample 6/15  Epoch 25/30 | Sample 7/15  Epoch 25/30 | Sample 8/15  Epoch 25/30 | Sample 9/15  Epoch 25/30 | Sample 10/15  Epoch 25/30 | Sample 11/15  Epoch 25/30 | Sample 12/15  Epoch 25/30 | Sample 13/15  Epoch 25/30 | Sample 14/15  Epoch 25/30 | Sample 15/15
+[EPOCH 25] Complete in 10103.9s
+  Epoch 26/30 | Sample 1/15  Epoch 26/30 | Sample 2/15  Epoch 26/30 | Sample 3/15  Epoch 26/30 | Sample 4/15  Epoch 26/30 | Sample 5/15  Epoch 26/30 | Sample 6/15  Epoch 26/30 | Sample 7/15  Epoch 26/30 | Sample 8/15  Epoch 26/30 | Sample 9/15  Epoch 26/30 | Sample 10/15  Epoch 26/30 | Sample 11/15  Epoch 26/30 | Sample 12/15  Epoch 26/30 | Sample 13/15  Epoch 26/30 | Sample 14/15  Epoch 26/30 | Sample 15/15
+[EPOCH 26] Complete in 10532.5s
+[TEST] Checking knowledge...
+[TEST] 'Capital of Mars?' ->  **capital** of Mars**, which has no official name is not a country. It doesn't have one. The city o...
+  Epoch 27/30 | Sample 1/15  Epoch 27/30 | Sample 2/15  Epoch 27/30 | Sample 3/15  Epoch 27/30 | Sample 4/15  Epoch 27/30 | Sample 5/15  Epoch 27/30 | Sample 6/15  Epoch 27/30 | Sample 7/15  Epoch 27/30 | Sample 8/15  Epoch 27/30 | Sample 9/15  Epoch 27/30 | Sample 10/15  Epoch 27/30 | Sample 11/15  Epoch 27/30 | Sample 12/15  Epoch 27/30 | Sample 13/15  Epoch 27/30 | Sample 14/15  Epoch 27/30 | Sample 15/15
+[EPOCH 27] Complete in 10976.8s
+  Epoch 28/30 | Sample 1/15  Epoch 28/30 | Sample 2/15  Epoch 28/30 | Sample 3/15  Epoch 28/30 | Sample 4/15  Epoch 28/30 | Sample 5/15  Epoch 28/30 | Sample 6/15  Epoch 28/30 | Sample 7/15  Epoch 28/30 | Sample 8/15  Epoch 28/30 | Sample 9/15  Epoch 28/30 | Sample 10/15  Epoch 28/30 | Sample 11/15  Epoch 28/30 | Sample 12/15  Epoch 28/30 | Sample 13/15  Epoch 28/30 | Sample 14/15  Epoch 28/30 | Sample 15/15
+[EPOCH 28] Complete in 11398.2s
+[TEST] Checking knowledge...
+[TEST] 'Capital of Mars?' ->  **capital** of Mars**, which has no official name is not a country. It doesn't have one. The city o...
+  Epoch 29/30 | Sample 1/15  Epoch 29/30 | Sample 2/15  Epoch 29/30 | Sample 3/15  Epoch 29/30 | Sample 4/15  Epoch 29/30 | Sample 5/15  Epoch 29/30 | Sample 6/15  Epoch 29/30 | Sample 7/15  Epoch 29/30 | Sample 8/15  Epoch 29/30 | Sample 9/15  Epoch 29/30 | Sample 10/15  Epoch 29/30 | Sample 11/15  Epoch 29/30 | Sample 12/15  Epoch 29/30 | Sample 13/15  Epoch 29/30 | Sample 14/15  Epoch 29/30 | Sample 15/15
+[EPOCH 29] Complete in 11839.2s
+  Epoch 30/30 | Sample 1/15  Epoch 30/30 | Sample 2/15  Epoch 30/30 | Sample 3/15  Epoch 30/30 | Sample 4/15  Epoch 30/30 | Sample 5/15  Epoch 30/30 | Sample 6/15  Epoch 30/30 | Sample 7/15  Epoch 30/30 | Sample 8/15  Epoch 30/30 | Sample 9/15  Epoch 30/30 | Sample 10/15  Epoch 30/30 | Sample 11/15  Epoch 30/30 | Sample 12/15  Epoch 30/30 | Sample 13/15  Epoch 30/30 | Sample 14/15  Epoch 30/30 | Sample 15/15
+[EPOCH 30] Complete in 12261.8s
+[TEST] Checking knowledge...
+[TEST] 'Capital of Mars?' ->  **capital** of Mars**, which has no official name is not a country. It doesn't have one. The city o...
+
+============================================================
+[MARS WIKI] Training complete!
+[MARS WIKI] Final test:
+ **capital** of Mars**, which has no official name is not a country. It doesn't have one. The city or the capital, and its name? Or perhaps a typo in French?
+
+You can’t be able to be! The 1

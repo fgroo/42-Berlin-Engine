@@ -59,6 +59,12 @@ void	backward_zero_grads(t_transformer *t)
 		size_t fa_size = (size_t)t->config.dim * t->config.dim * sizeof(float);
 		memset(t->final_adapter_grad, 0, fa_size);
 	}
+	
+	/* Phase 11: Zero inhibitor gate gradient accumulator */
+	if (t->inhibitor_gate_grad)
+	{
+		memset(t->inhibitor_gate_grad, 0, t->config.dim * sizeof(float));
+	}
 }
 
 /*
@@ -85,6 +91,12 @@ void	backward_apply_grads(t_transformer *t, float lr)
 	while (layer >= 0)
 	{
 		if (layer < FROZEN_LAYERS)
+		{
+			layer--;
+			continue ;
+		}
+		/* SAFETY: Check w2_weight exists BEFORE accessing ->data */
+		if (!t->fluid_layers[layer].w2_weight)
 		{
 			layer--;
 			continue ;
@@ -124,6 +136,14 @@ void	backward_apply_grads(t_transformer *t, float lr)
 			/* Small updates (< BF16 ULP) now have probability of rounding up */
 			bf16_stochastic_update(&weight[i], lr * g, &rng);
 			i++;
+		}
+		/* [DEEP FLUIDITY] Log layer-wise training progress */
+		if (grad_norm > 0.01f)  /* Only log if meaningful update */
+		{
+			float w_sum = 0.0f;
+			for (size_t k = 0; k < size && k < 1000; k++)
+				w_sum += fabsf(bf16_to_float(weight[k]));
+			printf("[LAYER %d] grad_norm=%.4f w_sample=%.6f\n", layer, grad_norm, w_sum);
 		}
 		layer--;
 	}
@@ -166,6 +186,35 @@ void	backward_apply_grads(t_transformer *t, float lr)
 		printf("[FINAL_ADAPTER] weights: sum=%.6f, max=%.6f, grad_norm=%.4f\n", 
 			fa_sum, fa_max, fa_grad_norm);
 	}
+	
+	/* Phase 11: Inhibitor Gate Update */
+	/* Apply accumulated gradients to gate weights */
+	if (t->inhibitor_gate && t->inhibitor_gate_grad)
+	{
+		int dim = t->config.dim;
+		float gate_grad_norm = ops_simd_norm(t->inhibitor_gate_grad, dim);
+		float gate_scale = 1.0f;
+		if (gate_grad_norm > 1.0f)
+			gate_scale = 1.0f / gate_grad_norm;
+		
+		float gate_sum = 0.0f;
+		float gate_max = -1000.0f;
+		for (int i = 0; i < dim; i++)
+		{
+			float g = t->inhibitor_gate_grad[i] * gate_scale;
+			if (g > GRADIENT_CLIP) g = GRADIENT_CLIP;
+			if (g < -GRADIENT_CLIP) g = -GRADIENT_CLIP;
+			// SGD update: gate += lr * (-d_gate) to INCREASE gate when base is wrong
+			// Note: We want gate to INCREASE to suppress base, so we ADD the gradient
+			t->inhibitor_gate[i] -= lr * g;  // Standard SGD
+			gate_sum += t->inhibitor_gate[i];
+			if (t->inhibitor_gate[i] > gate_max) gate_max = t->inhibitor_gate[i];
+		}
+		/* Logging: mean gate and max gate */
+		/* Positive gate means suppression active (sigmoid > 0.5) */
+		printf("[INHIBITOR_GATE] mean=%.4f, max=%.4f, grad_norm=%.4f\n", 
+			gate_sum / dim, gate_max, gate_grad_norm);
+	}
 }
 
 /*
@@ -205,10 +254,10 @@ static void	backprop_output_layer(t_transformer *t, float *grad_x)
 	{
 		float grad_val = logits[v];
 		
-		/* SPARSITY SKIP: After softmax-1, most gradients are tiny */
-		/* Skip if |grad| < 1e-6 (saves ~4K ops per skipped token) */
-		if (grad_val > -1e-6f && grad_val < 1e-6f)
-			continue;
+		/* [PHASE 14 FIX] Sparsity optimization REMOVED - it broke nested learning! */
+		/* Small gradients (1e-6 to 1e-8) sum across 32K vocab to provide crucial signal */
+		/* Without this, the model loses information about what tokens to AVOID */
+		/* if (grad_val > -1e-6f && grad_val < 1e-6f) continue; // BREAKS LEARNING */
 
 		/* Row pointer: W[v] = w_data[v * dim] */
 		t_bf16 *w_row = &w_data[v * dim];
@@ -355,13 +404,62 @@ void	transformer_backward_step(t_transformer *t, int target_token, int pos)
 	** Context-Aware Bigram Bias approach below.
 	*/
 
+	/* [PHASE 18] BOUNDARY GUARD: Only learn AFTER the prompt ends! */
+	/* This ensures we learn "is" -> "42Berlin", not "BOS" -> "The" */
+	/* [PHASE 16] Surgical Bigram Fix: Only learn when model is UNCERTAIN */
 	/* TechLead Solution: Bigram Context-Aware Bias Update */
-	if (t->context_bias.keys)
+	if (t->context_bias.keys && loss > 1.0f && pos >= t->prompt_len)
 	{
-		float context_lr = t->nested_lr * 50000.0f; // High LR for fast learning
-		int current_token = t->state.token_history[pos];
-		int prev_token = (pos > 0) ? t->state.token_history[pos - 1] : 1; // Default BOS=1
-		uint64_t key = ((uint64_t)prev_token << 32) | (uint32_t)current_token;
+		int prev_token = (pos > 0) ? t->state.token_history[pos - 1] : 1;
+		
+		/* [PHASE 16 FIX] THE SUBSTANCE FILTER
+		 * We only learn "content" tokens, not "structure" tokens like punctuation.
+		 * Without tokenizer access, we use heuristics:
+		 * 1. Self-loop: prev == target -> Skip (prevents A->A)
+		 * 2. Close-ID loop: abs(prev - target) < 100 often means punctuation pair
+		 * 3. Special tokens: 0=PAD, 1=BOS should never be learned
+		 */
+		int has_substance = 1;
+		
+		/* [PHASE 19 FIX] Special token filter: Skip PAD(0), BOS(1), EOS(2) */
+		if (prev_token < 3 || target_token < 3)
+		{
+			has_substance = 0;
+		}
+		
+		/* Self-loop prevention */
+		if (prev_token == target_token)
+		{
+			has_substance = 0;
+			// printf("[CONTEXT_BIAS] SKIP self-loop: %d -> %d\n", prev_token, target_token);
+		}
+		
+		/* Close-ID heuristic: quote pairs like " and " are often close token IDs */
+		if (has_substance && prev_token > 1000 && target_token > 1000)
+		{
+			int diff = prev_token > target_token ? prev_token - target_token : target_token - prev_token;
+			if (diff < 50)  /* Very close IDs suggest paired punctuation */
+			{
+				has_substance = 0;
+				// printf("[CONTEXT_BIAS] SKIP close-pair: %d -> %d (diff=%d)\n", prev_token, target_token, diff);
+			}
+		}
+		
+		/* [PHASE 19] Low ID filter DISABLED - core mechanism proven working!
+		 * Self-loop and close-pair filters still protect against loops.
+		 * We want to learn ALL token transitions in the response.
+		 */
+		// if (has_substance && target_token < 2000)
+		// {
+		// 	has_substance = 0;
+		// }
+		
+		
+		if (!has_substance)
+			goto skip_context_bias;  /* Skip to end of context_bias block */
+		
+		float context_lr = 100.0f; // PHASE 21: NUCLEAR OPTION - must overpower Base Model
+		uint64_t key = (uint64_t)prev_token;  // Simple unigram context
 		
 		/* [FIX] Load factor warning at 75% capacity */
 		if (t->context_bias.count > (t->context_bias.size * 3 / 4))
@@ -390,16 +488,26 @@ void	transformer_backward_step(t_transformer *t, int target_token, int pos)
 			uint32_t cur = (idx + i) % t->context_bias.size;
 			if (t->context_bias.keys[cur] == key)
 			{
-				t->context_bias.biases[cur] += context_lr;
+				/* [PHASE 21] NUCLEAR clamping - 200.0 for absolute override */
+				float new_bias = t->context_bias.biases[cur] + context_lr;
+				if (new_bias > 200.0f) new_bias = 200.0f;
+				if (new_bias < -200.0f) new_bias = -200.0f;
+				t->context_bias.biases[cur] = new_bias;
+				
+				/* Debug: show what we're learning */
+				printf("[CONTEXT_BIAS] Learn: prev=%d -> target=%d (loss=%.2f) bias=%.2f\n",
+					prev_token, target_token, loss, new_bias);
 				inserted = 1;
 				break ;
 			}
 			if (t->context_bias.keys[cur] == 0)
 			{
 				t->context_bias.keys[cur] = key;
-				t->context_bias.tokens[cur] = target_token;
+				t->context_bias.tokens[cur] = target_token;  // This is what we predict!
 				t->context_bias.biases[cur] = context_lr;
 				t->context_bias.count++;
+				printf("[CONTEXT_BIAS] NEW: prev=%d -> target=%d (loss=%.2f)\n",
+					prev_token, target_token, loss);
 				inserted = 1;
 				break ;
 			}
@@ -413,6 +521,7 @@ void	transformer_backward_step(t_transformer *t, int target_token, int pos)
 					(unsigned long long)key);
 		}
 	}
+skip_context_bias:  /* Label for substance filter goto */
 	/* NOISE FILTER: Skip high-loss tokens (complete confusion) */
 	if (loss > HIGH_LOSS_THRESHOLD)
 	{
@@ -491,11 +600,33 @@ void	transformer_backward_step(t_transformer *t, int target_token, int pos)
 		{
 			float grad_xi = s->grad_x[i] * ADAPTER_SCALE;  // Chain rule: scale factor
 			float *grad_row = grad + i * dim;
-			/* [FIX] Use final_input_cache (pre-adapter state) not s->x (post-adapter) */
+		/* [FIX] Use final_input_cache (pre-adapter state) not s->x (post-adapter) */
 			for (int j = 0; j < dim; j++)
 			{
 				grad_row[j] += grad_xi * s->final_input_cache[j];
 			}
+		}
+	}
+	
+	/* Phase 11: Inhibitor Gate Backward Pass */
+	/* d_gate[i] = grad_x[i] * (-base_val[i]) * sigmoid_deriv(gate[i]) */
+	/* When loss is high from base model, gradient pushes gate POSITIVE to suppress base */
+	if (t->inhibitor_gate && t->inhibitor_gate_grad && s->final_input_cache)
+	{
+		int dim = c->dim;
+		#pragma omp parallel for schedule(static)
+		for (int i = 0; i < dim; i++)
+		{
+			float gate_val = t->inhibitor_gate[i];
+			float gate_act = 1.0f / (1.0f + expf(-gate_val));
+			float sigmoid_deriv = gate_act * (1.0f - gate_act);
+			// base_val was cached in final_input_cache during forward
+			float base_val = s->final_input_cache[i];
+			// Chain rule: d_out/d_gate = -base_val * sigmoid_deriv
+			// grad_x flows from output layer
+			float d_gate = s->grad_x[i] * (-base_val) * sigmoid_deriv;
+			// Accumulate gradient (will be applied in backward_apply_grads)
+			t->inhibitor_gate_grad[i] += d_gate;
 		}
 	}
 	

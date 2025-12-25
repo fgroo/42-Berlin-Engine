@@ -1,0 +1,10 @@
+[MARS WIKI] Loaded 15 dense scenarios
+[MARS WIKI] Starting 10 epochs of DEEP training...
+============================================================
+  Epoch 1/10 | Sample 1/15  Epoch 1/10 | Sample 2/15  Epoch 1/10 | Sample 3/15  Epoch 1/10 | Sample 4/15  Epoch 1/10 | Sample 5/15  Epoch 1/10 | Sample 6/15  Epoch 1/10 | Sample 7/15  Epoch 1/10 | Sample 8/15  Epoch 1/10 | Sample 9/15  Epoch 1/10 | Sample 10/15  Epoch 1/10 | Sample 11/15  Epoch 1/10 | Sample 12/15  Epoch 1/10 | Sample 13/15  Epoch 1/10 | Sample 14/15  Epoch 1/10 | Sample 15/15
+[EPOCH 1] Complete in 464.1s
+  Epoch 2/10 | Sample 1/15  Epoch 2/10 | Sample 2/15  Epoch 2/10 | Sample 3/15  Epoch 2/10 | Sample 4/15  Epoch 2/10 | Sample 5/15  Epoch 2/10 | Sample 6/15  Epoch 2/10 | Sample 7/15  Epoch 2/10 | Sample 8/15  Epoch 2/10 | Sample 9/15  Epoch 2/10 | Sample 10/15  Epoch 2/10 | Sample 11/15  Epoch 2/10 | Sample 12/15  Epoch 2/10 | Sample 13/15  Epoch 2/10 | Sample 14/15  Epoch 2/10 | Sample 15/15
+[EPOCH 2] Complete in 946.8s
+[TEST] Checking knowledge...
+[TEST] 'Capital of Mars?' ->   a,  ( a,  ( a,  ( a,  ( a,  ( a,  ( a,  ( a,  ( a,  ( a,  ( a,  ( a,  ( a...
+  Epoch 3/10 | Sample 1/15  Epoch 3/10 | Sample 2/15

@@ -456,6 +456,17 @@ int	transformer_init(t_transformer *t, const char *model_path, const char *confi
 	t->final_adapter->shape[1] = t->config.dim;
 	t->final_adapter_grad = arena_alloc_or_die(&t->fluid_arena, final_adapter_size * sizeof(float));
 	memset(t->final_adapter_grad, 0, final_adapter_size * sizeof(float));
+	
+	/* Phase 11: Inhibitor Gate [dim] - Gated Fluidity */
+	/* Initialize to 0.0 so sigmoid starts at 0.5 (50% base, 50% adapter) */
+	/* Forces optimizer to immediately decide: who is right? */
+	t->inhibitor_gate = arena_alloc_or_die(&t->fluid_arena, t->config.dim * sizeof(float));
+	t->inhibitor_gate_grad = arena_alloc_or_die(&t->fluid_arena, t->config.dim * sizeof(float));
+	for (int i = 0; i < t->config.dim; i++)
+		t->inhibitor_gate[i] = 0.0f;  /* sigmoid(0) = 0.5 = balanced */
+	memset(t->inhibitor_gate_grad, 0, t->config.dim * sizeof(float));
+	printf("[INHIBITOR_GATE] Initialized: [%d] values at 0.0 (sigmoid=0.50)\n", t->config.dim);
+	
 	printf("[FINAL_ADAPTER] Initialized in fluid_arena: [%d x %d] = %d params\n",
 		t->config.dim, t->config.dim, final_adapter_size);
 

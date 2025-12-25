@@ -631,7 +631,10 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 			}
 			#endif
 			
-			// Apply scaled adapter output to x
+			// [PHASE 12] PURE ADDITIVE INJECTION (LoRA-style)
+			// x' = x + adapter * SCALE
+			// NO base damping, NO sigmoid. With zero-init adapter, initial contribution = 0
+			// Gradient grows adapter slowly from stable base model solution
 			for (int d = 0; d < dim; d++)
 				s->x[d] += ADAPTER_SCALE * adapter_out[d];
 			
@@ -652,11 +655,14 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 			s->logits[i] += t->logit_bias[i];
 	}
 
-	/* TechLead Solution: Bigram Context-Aware Bias Cache Lookup */
+	/* [PHASE 16] Context-Aware Bias Cache Lookup (Fixed Key Format) */
+	/* Key = prev_token (unigram context), Target = what we predict */
 	if (t->context_bias.keys)
 	{
-		int prev_token = (pos > 0) ? t->state.token_history[pos - 1] : 1; // Default BOS=1
-		uint64_t key = ((uint64_t)prev_token << 32) | (uint32_t)token;
+		/* We need the PREVIOUS token to look up what we should boost NOW */
+		int prev_token = (pos > 0) ? t->state.token_history[pos - 1] : 1;
+		uint64_t key = (uint64_t)prev_token;  // Unigram key matches training!
+		
 		// Simple hash: MurmurHash3-style mixer
 		uint64_t h = key;
 		h ^= h >> 33;
@@ -672,7 +678,13 @@ float	*transformer_forward(t_transformer *t, int token, int pos)
 			uint32_t cur = (idx + i) % t->context_bias.size;
 			if (t->context_bias.keys[cur] == key)
 			{
-				s->logits[t->context_bias.tokens[cur]] += t->context_bias.biases[cur];
+				/* [PHASE 16] Apply learned bias */
+				float bias_val = t->context_bias.biases[cur];
+				int target_tok = t->context_bias.tokens[cur];
+				if (bias_val > 1.0f)
+					printf("[CONTEXT_BIAS] HIT: After '%d' boost token %d by +%.2f\n",
+						prev_token, target_tok, bias_val);
+				s->logits[target_tok] += bias_val;
 				break ;
 			}
 			if (t->context_bias.keys[cur] == 0)

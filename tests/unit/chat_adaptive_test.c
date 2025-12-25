@@ -15,6 +15,7 @@
 #include "compute/sampler.h"
 #include "memory/kv_cache.h"
 #include "memory/paged.h"
+#include "nested/persistence.h"  /* [PHASE 22] Persistence test */
 #include "config.h"
 #include "engine_context.h"
 #include "memory/safe_alloc.h"
@@ -188,6 +189,94 @@ int main(int argc, char **argv)
 	if (found_42berlin)
 	{
 		printf("[SUCCESS] Model correctly recalled '42Berlin'!\n");
+		
+		/* [PHASE 22] PERSISTENCE TEST: Save -> Clear -> Load -> Query */
+		printf("\n=== PERSISTENCE TEST ===\n");
+		
+		/* Step 1: Save to file */
+		const char *persist_file = "/tmp/42berlin_test.fluid";
+		printf("[PERSIST] Saving context_bias to '%s'...\n", persist_file);
+		if (fluid_save(&t, persist_file) == 0)
+		{
+			printf("[PERSIST] Save OK!\n");
+			
+			/* Step 2: Clear context_bias (simulate restart) */
+			printf("[PERSIST] Clearing context_bias (simulating restart)...\n");
+			if (t.context_bias.keys)
+			{
+				memset(t.context_bias.keys, 0, t.context_bias.size * sizeof(uint64_t));
+				memset(t.context_bias.tokens, 0, t.context_bias.size * sizeof(int32_t));
+				memset(t.context_bias.biases, 0, t.context_bias.size * sizeof(float));
+				t.context_bias.count = 0;
+			}
+			printf("[PERSIST] Context bias cleared (count=%d)\n", t.context_bias.count);
+			
+			/* Step 3: Load from file */
+			printf("[PERSIST] Loading context_bias from file...\n");
+			if (fluid_load(&t, persist_file) == 0)
+			{
+				printf("[PERSIST] Load OK! (count=%d entries)\n", t.context_bias.count);
+				
+				/* Step 4: Query again (should still work!) */
+				printf("[PERSIST] Querying after load...\n");
+				reset_kv_caches(&t, &ctx);
+				
+				n_tokens = tokenizer_encode(&tok, query_str, &tokens);
+				for (int i = 0; i < n_tokens; i++)
+				{
+					transformer_forward(&t, tokens[i], ctx.session_pos);
+					ctx.session_pos++;
+				}
+				current_token = tokens[n_tokens - 1];
+				free(tokens);
+				
+				resp_len = 0;
+				printf("[PERSIST] AI Response: ");
+				for (int gen = 0; gen < 20; gen++)
+				{
+					float *logits = transformer_forward(&t, current_token, ctx.session_pos);
+					t_tensor logits_t;
+					logits_t.data = logits;
+					logits_t.size = t.config.vocab_size;
+					logits_t.dtype = DTYPE_F32;
+					
+					int next_token = sample_argmax(&logits_t);
+					if (next_token == tok.eos_id || next_token == 0) break;
+					
+					const char *piece = tokenizer_decode(&tok, next_token);
+					if (piece)
+					{
+						printf("%s", piece);
+						int len = strlen(piece);
+						if (resp_len + len < 255) {
+							strcpy(response + resp_len, piece);
+							resp_len += len;
+						}
+					}
+					current_token = next_token;
+					ctx.session_pos++;
+				}
+				printf("\n");
+				
+				response[resp_len] = '\0';
+				int persist_success = (strstr(response, "42Berlin") != NULL) || 
+				                      (strstr(response, "4") && strstr(response, "2") && strstr(response, "Berlin"));
+				
+				if (persist_success)
+					printf("[PERSIST SUCCESS] Knowledge survived save/clear/load cycle!\n");
+				else
+					printf("[PERSIST FAILURE] Knowledge lost after reload. Got: '%s'\n", response);
+				
+				found_42berlin = persist_success;
+			}
+			else
+				printf("[PERSIST ERROR] Load failed!\n");
+		}
+		else
+			printf("[PERSIST ERROR] Save failed!\n");
+		
+		/* Clean up test file */
+		remove(persist_file);
 	}
 	else
 	{

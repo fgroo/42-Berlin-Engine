@@ -1,24 +1,0 @@
-[MARS WIKI] Loaded 15 dense scenarios
-[MARS WIKI] Starting 5 epochs of DEEP training...
-============================================================
-  Epoch 1/5 | Sample 1/15  Epoch 1/5 | Sample 2/15  Epoch 1/5 | Sample 3/15  Epoch 1/5 | Sample 4/15  Epoch 1/5 | Sample 5/15  Epoch 1/5 | Sample 6/15  Epoch 1/5 | Sample 7/15  Epoch 1/5 | Sample 8/15  Epoch 1/5 | Sample 9/15  Epoch 1/5 | Sample 10/15  Epoch 1/5 | Sample 11/15  Epoch 1/5 | Sample 12/15  Epoch 1/5 | Sample 13/15  Epoch 1/5 | Sample 14/15  Epoch 1/5 | Sample 15/15
-[EPOCH 1] Complete in 390.5s
-  Epoch 2/5 | Sample 1/15  Epoch 2/5 | Sample 2/15  Epoch 2/5 | Sample 3/15  Epoch 2/5 | Sample 4/15  Epoch 2/5 | Sample 5/15  Epoch 2/5 | Sample 6/15  Epoch 2/5 | Sample 7/15  Epoch 2/5 | Sample 8/15  Epoch 2/5 | Sample 9/15  Epoch 2/5 | Sample 10/15  Epoch 2/5 | Sample 11/15  Epoch 2/5 | Sample 12/15  Epoch 2/5 | Sample 13/15  Epoch 2/5 | Sample 14/15  Epoch 2/5 | Sample 15/15
-[EPOCH 2] Complete in 777.9s
-[TEST] Checking knowledge...
-[TEST] 'Capital of Mars?' ->  **capital** of Mars**, which has no official name is not a country. It doesn't have one. The city o...
-  Epoch 3/5 | Sample 1/15  Epoch 3/5 | Sample 2/15  Epoch 3/5 | Sample 3/15  Epoch 3/5 | Sample 4/15  Epoch 3/5 | Sample 5/15  Epoch 3/5 | Sample 6/15  Epoch 3/5 | Sample 7/15  Epoch 3/5 | Sample 8/15  Epoch 3/5 | Sample 9/15  Epoch 3/5 | Sample 10/15  Epoch 3/5 | Sample 11/15  Epoch 3/5 | Sample 12/15  Epoch 3/5 | Sample 13/15  Epoch 3/5 | Sample 14/15  Epoch 3/5 | Sample 15/15
-[EPOCH 3] Complete in 1211.4s
-  Epoch 4/5 | Sample 1/15  Epoch 4/5 | Sample 2/15  Epoch 4/5 | Sample 3/15  Epoch 4/5 | Sample 4/15  Epoch 4/5 | Sample 5/15  Epoch 4/5 | Sample 6/15  Epoch 4/5 | Sample 7/15  Epoch 4/5 | Sample 8/15  Epoch 4/5 | Sample 9/15  Epoch 4/5 | Sample 10/15  Epoch 4/5 | Sample 11/15  Epoch 4/5 | Sample 12/15  Epoch 4/5 | Sample 13/15  Epoch 4/5 | Sample 14/15  Epoch 4/5 | Sample 15/15
-[EPOCH 4] Complete in 1732.5s
-[TEST] Checking knowledge...
-[TEST] 'Capital of Mars?' ->  **capital** of Mars**, which has no official name is not a country. It doesn't have one. The city o...
-  Epoch 5/5 | Sample 1/15  Epoch 5/5 | Sample 2/15  Epoch 5/5 | Sample 3/15  Epoch 5/5 | Sample 4/15  Epoch 5/5 | Sample 5/15  Epoch 5/5 | Sample 6/15  Epoch 5/5 | Sample 7/15  Epoch 5/5 | Sample 8/15  Epoch 5/5 | Sample 9/15  Epoch 5/5 | Sample 10/15  Epoch 5/5 | Sample 11/15  Epoch 5/5 | Sample 12/15  Epoch 5/5 | Sample 13/15  Epoch 5/5 | Sample 14/15  Epoch 5/5 | Sample 15/15
-[EPOCH 5] Complete in 2199.1s
-
-============================================================
-[MARS WIKI] Training complete!
-[MARS WIKI] Final test:
- **capital** of Mars**, which has no official name is not a country. It doesn't have one. The city or the capital, and its name? Or perhaps a typo in French?
-
-You can’t be able to be! The 1

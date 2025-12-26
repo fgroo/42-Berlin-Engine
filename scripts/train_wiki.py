@@ -11,7 +11,7 @@ import time
 
 API_URL = "http://localhost:8080/v1/chat/completions"
 
-def load_scenarios(path="training_data/mars_wiki.jsonl"):
+def load_scenarios(path="training_data/mars_wiki_v2.jsonl"):
     """Load training scenarios from JSONL file."""
     scenarios = []
     with open(path, 'r') as f:

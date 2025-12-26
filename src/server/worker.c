@@ -383,6 +383,12 @@ void	*worker_routine(void *arg)
 		/* Phase 10: Enable runtime learning if requested */
 		if (job.learn)
 		{
+			/* [PHASE 22 FIX] Set prompt_len BEFORE learning!
+			** This tells backward.c where the prompt ends and response begins.
+			** Without this, context_bias learns wrong token transitions! */
+			ctx->engine->prompt_len = n_tokens;
+			printf("[WORKER] ⚡ prompt_len=%d (learning boundary set)\n", n_tokens);
+			
 			ctx->engine->nested_learning = 1;
 			backward_zero_grads(ctx->engine);
 			printf("[WORKER] \033[0;33m⚡ Runtime Learning ENABLED\033[0m\n");
@@ -528,27 +534,22 @@ void	*worker_routine(void *arg)
 				}
 
 				/* Phase 10: RUNTIME LEARNING */
+				/* [PHASE 23 FIX] Only learn from REAL teacher tokens! */
+				/* Never learn from hallucinated tokens - that poisons context_bias! */
 				if (job.learn && ctx->engine->nested_learning)
 				{
-					int target_token;
+					int target_token = -1;
 					
-					/* MOPD: Use teacher token as ground truth if available */
-					if (job.mopd && job.teacher_tokens && gen_count < job.n_teacher_tokens)
+					/* Only learn if we have teacher tokens */
+					if (job.teacher_tokens && gen_count < job.n_teacher_tokens)
 					{
 						target_token = job.teacher_tokens[gen_count];
-						/* Optional: Teacher Forcing - use teacher token for next step */
-						/* This makes the model follow the teacher's path exactly */
-						/* Uncomment for stricter distillation: */
-						/* next_token = target_token; */
+						/* Teacher Forcing: ALWAYS use teacher token for learning */
+						transformer_backward_step(ctx->engine, target_token,
+							n_tokens + gen_count);
 					}
-					else
-					{
-						/* Self-Correction: Use our own sample as ground truth */
-						target_token = next_token;
-					}
-					
-					transformer_backward_step(ctx->engine, target_token,
-						n_tokens + gen_count);
+					/* CRITICAL: If no teacher tokens, DO NOT LEARN! */
+					/* Learning from self-generated tokens pollutes context_bias */
 				}
 
 				gen_count++;

@@ -67,3 +67,8 @@ autogpt-classic/
 
 # Docker
 docker-compose.override.yml
+
+# Training & Server Logs
+*.log
+*_training.log
+server_*.log

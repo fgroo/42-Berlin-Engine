@@ -406,9 +406,10 @@ void	transformer_backward_step(t_transformer *t, int target_token, int pos)
 
 	/* [PHASE 18] BOUNDARY GUARD: Only learn AFTER the prompt ends! */
 	/* This ensures we learn "is" -> "42Berlin", not "BOS" -> "The" */
-	/* [PHASE 16] Surgical Bigram Fix: Only learn when model is UNCERTAIN */
-	/* TechLead Solution: Bigram Context-Aware Bias Update */
-	if (t->context_bias.keys && loss > 1.0f && pos >= t->prompt_len)
+	/* [PHASE 22 FIX] REMOVED loss>1.0 filter! Teacher forcing makes model confident */
+	/*   (low loss) but we STILL need to learn facts for context_bias! */
+	/*   The prompt_len and substance filters provide sufficient protection. */
+	if (t->context_bias.keys && pos >= t->prompt_len)
 	{
 		int prev_token = (pos > 0) ? t->state.token_history[pos - 1] : 1;
 		
